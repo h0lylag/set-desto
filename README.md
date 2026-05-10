@@ -28,6 +28,8 @@ You can override the callback URL with `SET_DESTO_EVE_REDIRECT_URI`, but it must
 
 Character metadata is stored in the platform config directory. Access and refresh tokens are stored in the OS keyring: Secret Service on Linux and Windows Credential Manager on Windows. Access tokens are reused until they are close to expiry, then refreshed with the saved refresh token.
 
+Manual destinations can be entered as numeric ESI IDs or exact solar system/station names. Name lookup uses ESI `/universe/ids/` before sending waypoint requests.
+
 ## Build
 
 ```bash

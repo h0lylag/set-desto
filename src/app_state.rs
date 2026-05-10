@@ -5,6 +5,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use eframe::egui;
 use tracing::{debug, error, info, warn};
 
+use crate::domain::destination;
 use crate::eve::auth::{self, AuthenticatedCharacter, LoginResult, SsoConfig};
 use crate::eve::waypoints::{self, WaypointOptions};
 use crate::storage::config::{AppConfig, CharacterConfig};
@@ -151,14 +152,15 @@ impl SetDestoApp {
             return;
         }
 
-        let destination_id = match parse_destination_id(&destination) {
-            Ok(destination_id) => destination_id,
+        let resolved_destination = match destination::resolve(&destination) {
+            Ok(destination) => destination,
             Err(err) => {
-                warn!(destination = %destination, error = ?err, "Destination parsing failed");
+                warn!(destination = %destination, error = ?err, "Destination resolution failed");
                 self.status_message = err.to_string();
                 return;
             }
         };
+        let destination_id = resolved_destination.id;
 
         let characters_with_access_tokens = self
             .characters
@@ -169,6 +171,9 @@ impl SetDestoApp {
             destination = %destination,
             mode = ?self.mode,
             pinned = self.pin_destination,
+            destination_id,
+            destination_name = %resolved_destination.name,
+            destination_kind = resolved_destination.kind.label(),
             character_count = self.characters.len(),
             characters_with_access_tokens,
             "Set Destination requested"
@@ -218,8 +223,10 @@ impl SetDestoApp {
         }
 
         if failures.is_empty() {
-            self.status_message =
-                format!("Set destination {destination_id} for {successes} characters");
+            self.status_message = format!(
+                "Set {} ({destination_id}) for {successes} characters",
+                resolved_destination.name
+            );
         } else {
             self.status_message = format!(
                 "Set destination for {successes}/{} characters; first error: {}",
@@ -427,19 +434,6 @@ impl CharacterState {
     }
 }
 
-fn parse_destination_id(destination: &str) -> Result<i64> {
-    let destination_id = destination.trim().parse::<i64>().with_context(|| {
-        "Destination name resolution is not implemented yet; enter a numeric ESI destination ID"
-            .to_string()
-    })?;
-
-    if destination_id <= 0 {
-        bail!("Destination ID must be a positive ESI ID");
-    }
-
-    Ok(destination_id)
-}
-
 fn expires_at_from_now(expires_in: u64) -> SystemTime {
     SystemTime::now() + Duration::from_secs(expires_in)
 }
@@ -452,27 +446,5 @@ fn upsert_character(characters: &mut Vec<CharacterState>, character: CharacterSt
         *existing = character;
     } else {
         characters.push(character);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_numeric_destination_id() {
-        assert_eq!(parse_destination_id("30000142").unwrap(), 30000142);
-    }
-
-    #[test]
-    fn rejects_destination_names_until_resolution_exists() {
-        let err = parse_destination_id("Jita").unwrap_err().to_string();
-        assert!(err.contains("Destination name resolution is not implemented yet"));
-    }
-
-    #[test]
-    fn rejects_non_positive_destination_id() {
-        let err = parse_destination_id("0").unwrap_err().to_string();
-        assert!(err.contains("positive ESI ID"));
     }
 }

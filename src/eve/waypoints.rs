@@ -1,9 +1,8 @@
 use anyhow::{Context, Result, bail};
 use reqwest::StatusCode;
-use reqwest::blocking::Client;
 use tracing::{debug, info};
 
-const ESI_WAYPOINT_URL: &str = "https://esi.evetech.net/latest/ui/autopilot/waypoint/";
+use crate::eve::esi;
 
 #[derive(Clone, Copy, Debug)]
 pub struct WaypointOptions {
@@ -16,10 +15,7 @@ pub fn set_waypoint(
     destination_id: i64,
     options: WaypointOptions,
 ) -> Result<()> {
-    let client = Client::builder()
-        .user_agent(format!("set-desto/{}", env!("CARGO_PKG_VERSION")))
-        .build()
-        .context("Failed to build ESI HTTP client")?;
+    let client = esi::client()?;
 
     debug!(
         destination_id,
@@ -29,10 +25,10 @@ pub fn set_waypoint(
     );
 
     let response = client
-        .post(ESI_WAYPOINT_URL)
+        .post(format!("{}/ui/autopilot/waypoint/", esi::ESI_BASE_URL))
         .bearer_auth(access_token)
         .query(&[
-            ("datasource", "tranquility".to_string()),
+            ("datasource", esi::DATASOURCE.to_string()),
             ("destination_id", destination_id.to_string()),
             ("add_to_beginning", options.add_to_beginning.to_string()),
             (
@@ -49,8 +45,8 @@ pub fn set_waypoint(
         return Ok(());
     }
 
-    let body = response
-        .text()
-        .unwrap_or_else(|_| "failed to read ESI error body".to_string());
-    bail!("ESI waypoint request failed ({status}): {body}")
+    bail!(
+        "ESI waypoint request failed ({status}): {}",
+        esi::error_body(response)
+    )
 }

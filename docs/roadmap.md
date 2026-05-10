@@ -10,7 +10,7 @@ This is the remaining implementation plan from the current SSO proof of life to 
 - Add Character can authenticate a character, save non-secret metadata to config, and persist tokens in the OS keyring.
 - Access tokens are cached with an absolute expiry timestamp and reused until they are close to expiry.
 - Refresh tokens are persisted through the OS keyring and used to renew stale access tokens before ESI calls.
-- ESI waypoint calls are wired for numeric destination IDs.
+- ESI waypoint calls are wired for numeric destination IDs and exact solar system/station names through ESI `/universe/ids/`.
 
 ## 1. Cross-Platform Storage
 
@@ -56,9 +56,9 @@ Goal: make ESI callers ask for an access token without caring whether refresh is
 
 Goal: centralize HTTP behavior and headers for all ESI calls.
 
-- Add `eve::esi`.
+- `eve::esi` exists for shared ESI HTTP setup.
 - Use `reqwest` with a shared user agent.
-- Add ESI base URL constants.
+- ESI base URL, datasource, language, and compatibility-date headers are centralized.
 - Add request helpers for:
   - authenticated requests
   - JSON parsing
@@ -89,10 +89,10 @@ Goal: set a destination for one or more authenticated characters.
 
 Goal: turn user input into an ESI `destination_id`.
 
-- Add `domain::destination`.
-- Support direct numeric IDs first.
-- Add solar system name lookup.
-- Add station/structure support after the basic flow works.
+- `domain::destination` exists.
+- Direct numeric IDs are supported.
+- Exact solar system and station name lookup use ESI `/universe/ids/`.
+- Add structure support after the basic flow works.
 - Decide whether to use:
   - ESI search
   - bundled/static SDE data
@@ -162,4 +162,4 @@ When adding files used by the Rust crate, make sure they are tracked by git befo
 
 ## Suggested Next Step
 
-Implement destination name resolution. The waypoint flow now needs to turn input like `Kedama` into an ESI destination ID before it can be useful in normal play.
+Add character selection/groups so setting a destination does not always target every authenticated character.
