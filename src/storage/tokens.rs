@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use keyring::{Entry, Error as KeyringError};
+use tracing::{debug, info};
 
 const SERVICE_NAME: &str = "set-desto";
 const USERNAME_PREFIX: &str = "eve-character";
@@ -18,10 +19,15 @@ impl TokenStore for KeyringTokenStore {
     fn save_refresh_token(&self, character_id: u64, refresh_token: &str) -> Result<()> {
         entry_for_character(character_id)?
             .set_password(refresh_token)
-            .with_context(|| format!("Failed to save refresh token for character {character_id}"))
+            .with_context(|| {
+                format!("Failed to save refresh token for character {character_id}")
+            })?;
+        info!(character_id, "Saved refresh token to OS keyring");
+        Ok(())
     }
 
     fn load_refresh_token(&self, character_id: u64) -> Result<String> {
+        debug!(character_id, "Loading refresh token from OS keyring");
         entry_for_character(character_id)?
             .get_password()
             .with_context(|| format!("Failed to load refresh token for character {character_id}"))
@@ -29,7 +35,14 @@ impl TokenStore for KeyringTokenStore {
 
     fn delete_refresh_token(&self, character_id: u64) -> Result<()> {
         match entry_for_character(character_id)?.delete_credential() {
-            Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
+            Ok(()) => {
+                info!(character_id, "Deleted refresh token from OS keyring");
+                Ok(())
+            }
+            Err(KeyringError::NoEntry) => {
+                debug!(character_id, "No refresh token existed in OS keyring");
+                Ok(())
+            }
             Err(err) => Err(err).with_context(|| {
                 format!("Failed to delete refresh token for character {character_id}")
             }),

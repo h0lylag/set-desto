@@ -2,7 +2,7 @@ use std::sync::mpsc::Receiver;
 
 use anyhow::{Context, Result};
 use eframe::egui;
-use tracing::debug;
+use tracing::{debug, error, info, warn};
 
 use crate::eve::auth::{self, AuthenticatedCharacter, LoginResult, SsoConfig};
 use crate::storage::config::{AppConfig, CharacterConfig};
@@ -38,16 +38,25 @@ pub struct SetDestoApp {
 
 impl SetDestoApp {
     pub fn new(cc: &eframe::CreationContext<'_>, debug_mode: bool) -> Self {
-        debug!("Initializing Set Desto (debug_mode={})", debug_mode);
+        info!(debug_mode, "Initializing Set Desto");
 
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
 
         let (config, status_message) = match AppConfig::load() {
-            Ok(config) => (config, "Ready".to_string()),
-            Err(err) => (
-                AppConfig::default(),
-                format!("Failed to load config: {err}"),
-            ),
+            Ok(config) => {
+                info!(
+                    character_count = config.characters.len(),
+                    "Loaded application config"
+                );
+                (config, "Ready".to_string())
+            }
+            Err(err) => {
+                error!(error = ?err, "Failed to load application config");
+                (
+                    AppConfig::default(),
+                    format!("Failed to load config: {err}"),
+                )
+            }
         };
         let characters = config
             .characters
@@ -76,17 +85,20 @@ impl SetDestoApp {
 
     pub fn start_character_login(&mut self) {
         if self.login_in_progress() {
+            debug!("Ignoring Add Character click because login is already in progress");
             return;
         }
 
         let config = match SsoConfig::from_env() {
             Ok(config) => config,
             Err(err) => {
+                warn!(error = ?err, "Cannot start EVE SSO login");
                 self.status_message = err.to_string();
                 return;
             }
         };
 
+        info!(redirect_uri = %config.redirect_uri, "Starting EVE SSO login");
         self.status_message = "Opening EVE SSO login...".to_string();
         self.login_receiver = Some(auth::start_login(config));
     }
@@ -101,20 +113,24 @@ impl SetDestoApp {
                 let character_name = character.character_name.clone();
                 match self.save_logged_in_character(character) {
                     Ok(()) => {
+                        info!(character_name, "Character login saved");
                         self.status_message = format!("Added {character_name}");
                     }
                     Err(err) => {
+                        error!(character_name, error = ?err, "Failed to save character login");
                         self.status_message = format!("Failed to save {character_name}: {err}");
                     }
                 }
                 self.login_receiver = None;
             }
             Ok(Err(error)) => {
+                error!(error, "EVE SSO login failed");
                 self.status_message = format!("Login failed: {error}");
                 self.login_receiver = None;
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                error!("EVE SSO worker disconnected");
                 self.status_message = "Login failed: SSO worker stopped".to_string();
                 self.login_receiver = None;
             }
@@ -125,17 +141,40 @@ impl SetDestoApp {
         let destination = self.destination.trim().to_owned();
 
         if destination.is_empty() {
+            warn!("Set Destination blocked because destination is empty");
             self.status_message = "Destination required".to_string();
             return;
         }
 
-        self.status_message = format!("Destination queued: {destination}");
-        debug!(
-            destination,
+        let characters_with_access_tokens = self
+            .characters
+            .iter()
+            .filter(|character| character.has_access_token())
+            .count();
+        info!(
+            destination = %destination,
             mode = ?self.mode,
             pinned = self.pin_destination,
-            "Destination queued"
+            character_count = self.characters.len(),
+            characters_with_access_tokens,
+            "Set Destination requested"
         );
+
+        if self.characters.is_empty() {
+            warn!("Set Destination requested with no characters added");
+        } else if characters_with_access_tokens == 0 {
+            warn!(
+                "Set Destination requested but no character has an access token loaded; token refresh is not implemented yet"
+            );
+        }
+
+        warn!(
+            destination = %destination,
+            "Waypoint sending is not implemented yet; no ESI request was sent"
+        );
+
+        self.status_message =
+            format!("Waypoint sending not implemented yet for destination: {destination}");
     }
 
     pub fn clear_destination_form(&mut self) {
@@ -152,6 +191,13 @@ impl SetDestoApp {
             scopes: character.scopes.clone(),
         };
 
+        info!(
+            character_id = character.character_id,
+            character_name = %character.character_name,
+            scope_count = character.scopes.len(),
+            expires_in = character.expires_in,
+            "Saving authenticated character"
+        );
         self.token_store
             .save_refresh_token(character.character_id, &character.refresh_token)?;
 
@@ -204,6 +250,10 @@ impl CharacterState {
             expires_in: Some(expires_in),
             refresh_token_saved: true,
         }
+    }
+
+    pub fn has_access_token(&self) -> bool {
+        self.access_token.is_some()
     }
 
     pub fn token_summary(&self) -> String {

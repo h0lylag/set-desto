@@ -11,6 +11,7 @@ use reqwest::blocking::Client;
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use tracing::{debug, info};
 use url::Url;
 
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:18421/callback";
@@ -54,6 +55,7 @@ pub type LoginResult = Result<AuthenticatedCharacter, String>;
 pub fn start_login(config: SsoConfig) -> Receiver<LoginResult> {
     let (sender, receiver) = mpsc::channel();
 
+    debug!("Spawning EVE SSO login worker");
     thread::spawn(move || {
         let result = run_login(config).map_err(|err| err.to_string());
         let _ = sender.send(result);
@@ -63,6 +65,7 @@ pub fn start_login(config: SsoConfig) -> Receiver<LoginResult> {
 }
 
 fn run_login(config: SsoConfig) -> Result<AuthenticatedCharacter> {
+    info!(redirect_uri = %config.redirect_uri, "Starting EVE SSO authorization code flow");
     let client = Client::builder()
         .user_agent(format!("set-desto/{}", env!("CARGO_PKG_VERSION")))
         .build()
@@ -85,19 +88,23 @@ fn run_login(config: SsoConfig) -> Result<AuthenticatedCharacter> {
     listener
         .set_nonblocking(true)
         .context("Failed to configure callback listener")?;
+    info!(bind_addr = %bind_addr, "Listening for EVE SSO callback");
 
     let state = random_url_token(32);
     let code_verifier = random_url_token(32);
     let code_challenge = pkce_challenge(&code_verifier);
     let authorize_url = build_authorize_url(&metadata, &config, &state, &code_challenge)?;
 
+    info!(scope_count = SCOPES.len(), "Opening browser for EVE SSO");
     webbrowser::open(authorize_url.as_str()).context("Failed to open browser for EVE SSO")?;
 
     let callback = wait_for_callback(&listener, &state)?;
+    info!("Received EVE SSO callback, exchanging authorization code");
     exchange_code(&client, &metadata, &config, &code_verifier, &callback.code)
 }
 
 fn fetch_metadata(client: &Client) -> Result<SsoMetadata> {
+    debug!("Fetching EVE SSO metadata");
     client
         .get(METADATA_URL)
         .send()
@@ -236,6 +243,14 @@ fn exchange_code(
         .ok_or_else(|| anyhow!("EVE SSO token subject was not a character"))?
         .parse()
         .context("Failed to parse EVE character ID from SSO token")?;
+
+    info!(
+        character_id,
+        character_name = %claims.name,
+        scope_count = claims.scp.len(),
+        expires_in = token_response.expires_in,
+        "EVE SSO token exchange succeeded"
+    );
 
     Ok(AuthenticatedCharacter {
         character_id,

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, anyhow};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info};
 
 const CONFIG_FILE: &str = "config.json";
 
@@ -16,8 +17,10 @@ pub struct AppConfig {
 impl AppConfig {
     pub fn load() -> Result<Self> {
         let path = config_path()?;
+        debug!(path = %path.display(), "Loading app config");
 
         if !path.exists() {
+            info!(path = %path.display(), "App config does not exist yet");
             return Ok(Self::default());
         }
 
@@ -29,6 +32,11 @@ impl AppConfig {
 
     pub fn save(&self) -> Result<()> {
         let path = config_path()?;
+        debug!(
+            path = %path.display(),
+            character_count = self.characters.len(),
+            "Saving app config"
+        );
         let parent = path
             .parent()
             .ok_or_else(|| anyhow!("Config path did not include a parent directory"))?;
@@ -39,7 +47,13 @@ impl AppConfig {
         let contents =
             serde_json::to_string_pretty(self).context("Failed to serialize app config")?;
         fs::write(&path, contents)
-            .with_context(|| format!("Failed to write config to {}", path.display()))
+            .with_context(|| format!("Failed to write config to {}", path.display()))?;
+        info!(
+            path = %path.display(),
+            character_count = self.characters.len(),
+            "Saved app config"
+        );
+        Ok(())
     }
 
     pub fn upsert_character(&mut self, character: CharacterConfig) {
