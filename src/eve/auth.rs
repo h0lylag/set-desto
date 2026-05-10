@@ -49,27 +49,6 @@ pub struct AuthenticatedCharacter {
     pub expires_in: u64,
 }
 
-impl AuthenticatedCharacter {
-    pub fn token_summary(&self) -> String {
-        let access_status = if self.access_token.is_empty() {
-            "no access token"
-        } else {
-            "access token loaded"
-        };
-        let refresh_status = if self.refresh_token.is_empty() {
-            "no refresh token"
-        } else {
-            "refresh token loaded"
-        };
-
-        format!(
-            "{} scopes, {access_status}, {refresh_status}, expires in {}s",
-            self.scopes.len(),
-            self.expires_in
-        )
-    }
-}
-
 pub type LoginResult = Result<AuthenticatedCharacter, String>;
 
 pub fn start_login(config: SsoConfig) -> Receiver<LoginResult> {

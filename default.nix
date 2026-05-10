@@ -12,6 +12,7 @@ let
     wayland
     libx11
     libxcursor
+    dbus
     libxrandr
     libxi
   ];

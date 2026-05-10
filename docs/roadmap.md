@@ -7,8 +7,8 @@ This is the remaining implementation plan from the current SSO proof of life to 
 - Egui app scaffold is in place.
 - Manual and Clipboard destination modes exist, with Clipboard still a stub.
 - EVE SSO Authorization Code with PKCE works through a loopback callback.
-- Add Character can authenticate a character and keep the token response in memory.
-- Tokens are not persisted yet.
+- Add Character can authenticate a character, keep the access token in memory, save non-secret metadata to config, and save the refresh token in the OS keyring.
+- Refresh tokens are persisted through the OS keyring.
 - Tokens are not refreshed yet.
 - No ESI waypoint calls are wired yet.
 
@@ -16,8 +16,8 @@ This is the remaining implementation plan from the current SSO proof of life to 
 
 Goal: persist characters safely across restarts without storing refresh tokens in plaintext.
 
-- Add `storage::config` for non-secret app data.
-- Add `storage::tokens` for OS keyring access.
+- `storage::config` exists for non-secret app data.
+- `storage::tokens` exists for OS keyring access.
 - Use a cross-platform config directory helper such as `directories`.
 - Use the Rust `keyring` crate for refresh tokens:
   - Linux: Secret Service / GNOME Keyring / KWallet.
@@ -27,8 +27,8 @@ Goal: persist characters safely across restarts without storing refresh tokens i
   - character name
   - granted scopes
   - token/keyring entry identifier
-- Store refresh tokens only in the OS keyring.
-- Keep access tokens only in memory.
+- Refresh tokens are stored only in the OS keyring.
+- Access tokens are kept only in memory.
 - Add remove/logout behavior:
   - delete character metadata
   - delete keyring refresh token
@@ -162,4 +162,4 @@ When adding files used by the Rust crate, make sure they are tracked by git befo
 
 ## Suggested Next Step
 
-Implement `storage::config`, `storage::tokens`, and a first `TokenManager`. That gives the app durable characters and automatic refresh, which is the foundation needed before wiring waypoint calls.
+Implement a first `TokenManager`. That gives the app automatic refresh, which is the foundation needed before wiring waypoint calls.

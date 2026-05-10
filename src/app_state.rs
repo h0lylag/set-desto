@@ -1,9 +1,12 @@
 use std::sync::mpsc::Receiver;
 
+use anyhow::{Context, Result};
 use eframe::egui;
 use tracing::debug;
 
 use crate::eve::auth::{self, AuthenticatedCharacter, LoginResult, SsoConfig};
+use crate::storage::config::{AppConfig, CharacterConfig};
+use crate::storage::tokens::{KeyringTokenStore, TokenStore};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DestoMode {
@@ -22,13 +25,15 @@ impl DestoMode {
 
 pub struct SetDestoApp {
     pub debug_mode: bool,
-    pub characters: Vec<AuthenticatedCharacter>,
+    pub characters: Vec<CharacterState>,
     pub destination: String,
     pub notes: String,
     pub pin_destination: bool,
     pub mode: DestoMode,
     pub status_message: String,
+    config: AppConfig,
     login_receiver: Option<Receiver<LoginResult>>,
+    token_store: KeyringTokenStore,
 }
 
 impl SetDestoApp {
@@ -37,15 +42,31 @@ impl SetDestoApp {
 
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
 
+        let (config, status_message) = match AppConfig::load() {
+            Ok(config) => (config, "Ready".to_string()),
+            Err(err) => (
+                AppConfig::default(),
+                format!("Failed to load config: {err}"),
+            ),
+        };
+        let characters = config
+            .characters
+            .iter()
+            .cloned()
+            .map(CharacterState::from_config)
+            .collect();
+
         Self {
             debug_mode,
-            characters: Vec::new(),
+            characters,
             destination: String::new(),
             notes: String::new(),
             pin_destination: false,
             mode: DestoMode::Manual,
-            status_message: "Ready".to_string(),
+            status_message,
+            config,
             login_receiver: None,
+            token_store: KeyringTokenStore,
         }
     }
 
@@ -77,8 +98,15 @@ impl SetDestoApp {
 
         match receiver.try_recv() {
             Ok(Ok(character)) => {
-                self.status_message = format!("Added {}", character.character_name);
-                upsert_character(&mut self.characters, character);
+                let character_name = character.character_name.clone();
+                match self.save_logged_in_character(character) {
+                    Ok(()) => {
+                        self.status_message = format!("Added {character_name}");
+                    }
+                    Err(err) => {
+                        self.status_message = format!("Failed to save {character_name}: {err}");
+                    }
+                }
                 self.login_receiver = None;
             }
             Ok(Err(error)) => {
@@ -116,12 +144,88 @@ impl SetDestoApp {
         self.pin_destination = false;
         self.status_message = "Cleared".to_string();
     }
+
+    fn save_logged_in_character(&mut self, character: AuthenticatedCharacter) -> Result<()> {
+        let character_config = CharacterConfig {
+            character_id: character.character_id,
+            character_name: character.character_name.clone(),
+            scopes: character.scopes.clone(),
+        };
+
+        self.token_store
+            .save_refresh_token(character.character_id, &character.refresh_token)?;
+
+        self.config.upsert_character(character_config.clone());
+        self.config
+            .save()
+            .context("Failed to save character metadata")?;
+
+        upsert_character(
+            &mut self.characters,
+            CharacterState::from_login(
+                character_config,
+                character.access_token,
+                character.expires_in,
+            ),
+        );
+
+        Ok(())
+    }
 }
 
-fn upsert_character(
-    characters: &mut Vec<AuthenticatedCharacter>,
-    character: AuthenticatedCharacter,
-) {
+#[derive(Debug)]
+pub struct CharacterState {
+    pub character_id: u64,
+    pub character_name: String,
+    pub scopes: Vec<String>,
+    access_token: Option<String>,
+    expires_in: Option<u64>,
+    refresh_token_saved: bool,
+}
+
+impl CharacterState {
+    fn from_config(character: CharacterConfig) -> Self {
+        Self {
+            character_id: character.character_id,
+            character_name: character.character_name,
+            scopes: character.scopes,
+            access_token: None,
+            expires_in: None,
+            refresh_token_saved: true,
+        }
+    }
+
+    fn from_login(character: CharacterConfig, access_token: String, expires_in: u64) -> Self {
+        Self {
+            character_id: character.character_id,
+            character_name: character.character_name,
+            scopes: character.scopes,
+            access_token: Some(access_token),
+            expires_in: Some(expires_in),
+            refresh_token_saved: true,
+        }
+    }
+
+    pub fn token_summary(&self) -> String {
+        let access_status = match (&self.access_token, self.expires_in) {
+            (Some(_), Some(expires_in)) => format!("access token loaded, expires in {expires_in}s"),
+            (Some(_), None) => "access token loaded".to_string(),
+            (None, _) => "access token needs refresh".to_string(),
+        };
+        let refresh_status = if self.refresh_token_saved {
+            "refresh token saved"
+        } else {
+            "no refresh token"
+        };
+
+        format!(
+            "{} scopes, {access_status}, {refresh_status}",
+            self.scopes.len()
+        )
+    }
+}
+
+fn upsert_character(characters: &mut Vec<CharacterState>, character: CharacterState) {
     if let Some(existing) = characters
         .iter_mut()
         .find(|existing| existing.character_id == character.character_id)

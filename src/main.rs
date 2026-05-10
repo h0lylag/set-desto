@@ -6,6 +6,7 @@ mod app_state;
 mod cli;
 mod eve;
 mod logging;
+mod storage;
 mod ui;
 
 use anyhow::Result;

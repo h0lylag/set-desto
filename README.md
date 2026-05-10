@@ -26,6 +26,8 @@ cargo run
 
 You can override the callback URL with `SET_DESTO_EVE_REDIRECT_URI`, but it must also be registered with EVE SSO and use a loopback address.
 
+Character metadata is stored in the platform config directory. Refresh tokens are stored in the OS keyring: Secret Service on Linux and Windows Credential Manager on Windows.
+
 ## Build
 
 ```bash
