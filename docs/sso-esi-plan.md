@@ -63,11 +63,11 @@ Support logout by deleting the keyring entry and calling the SSO revoke endpoint
 
 ## Implementation Order
 
-1. Add dependencies: `serde`, `serde_json`, `dirs`, `reqwest`, `tokio`, `oauth2`, `url`, `rand`, `keyring`, and a JWT/JWKS validation crate.
+1. Add dependencies: `serde`, `serde_json`, `reqwest`, `url`, `rand`, and PKCE helpers. Initial implementation uses `SET_DESTO_EVE_CLIENT_ID` and `SET_DESTO_EVE_REDIRECT_URI`, with `http://127.0.0.1:18421/callback` as the default redirect URI.
 2. Add static config loading for client ID and redirect URI.
-3. Build `eve::auth` with tests for authorize URL generation, PKCE, and state verification.
+3. Build `eve::auth` with authorize URL generation, PKCE, callback handling, and token exchange.
 4. Add a login panel and authenticated-character list.
-5. Add secure token storage and token refresh.
+5. Add secure token storage, token refresh, token revocation, and JWT/JWKS validation.
 6. Add `eve::esi` client and the waypoint route.
 7. Add destination resolution.
 8. Add group selection and batch waypoint execution.

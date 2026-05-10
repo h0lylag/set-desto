@@ -2,23 +2,20 @@ use eframe::egui;
 
 use crate::app_state::{DestoMode, SetDestoApp};
 
-pub fn render(ctx: &egui::Context, app: &mut SetDestoApp) {
-    egui::CentralPanel::default().show(ctx, |ui| {
-        ui.add_space(8.0);
-        render_mode_selector(ui, app);
+pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
+    render_mode_selector(ui, app);
 
-        ui.add_space(16.0);
-        render_destination_input(ui, app);
+    ui.add_space(16.0);
+    render_destination_input(ui, app);
 
-        ui.add_space(8.0);
-        ui.checkbox(&mut app.pin_destination, "Pin destination");
+    ui.add_space(8.0);
+    ui.checkbox(&mut app.pin_destination, "Pin destination");
 
-        ui.add_space(16.0);
-        render_notes_input(ui, app);
+    ui.add_space(16.0);
+    render_notes_input(ui, app);
 
-        ui.add_space(16.0);
-        render_actions(ui, app);
-    });
+    ui.add_space(16.0);
+    render_actions(ui, app);
 }
 
 fn render_mode_selector(ui: &mut egui::Ui, app: &mut SetDestoApp) {

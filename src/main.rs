@@ -4,6 +4,7 @@ mod app;
 mod app_constants;
 mod app_state;
 mod cli;
+mod eve;
 mod logging;
 mod ui;
 
