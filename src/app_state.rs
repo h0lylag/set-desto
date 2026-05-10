@@ -152,6 +152,19 @@ impl SetDestoApp {
             return;
         }
 
+        if self.characters.is_empty() {
+            warn!("Set Destination requested with no characters added");
+            self.status_message = "Add at least one character first".to_string();
+            return;
+        }
+
+        let selected_character_count = self.selected_character_count();
+        if selected_character_count == 0 {
+            warn!("Set Destination requested with no selected characters");
+            self.status_message = "Select at least one character".to_string();
+            return;
+        }
+
         let resolved_destination = match destination::resolve(&destination) {
             Ok(destination) => destination,
             Err(err) => {
@@ -162,10 +175,10 @@ impl SetDestoApp {
         };
         let destination_id = resolved_destination.id;
 
-        let characters_with_access_tokens = self
+        let selected_characters_with_access_tokens = self
             .characters
             .iter()
-            .filter(|character| character.has_access_token())
+            .filter(|character| character.selected && character.has_access_token())
             .count();
         info!(
             destination = %destination,
@@ -175,15 +188,10 @@ impl SetDestoApp {
             destination_name = %resolved_destination.name,
             destination_kind = resolved_destination.kind.label(),
             character_count = self.characters.len(),
-            characters_with_access_tokens,
+            selected_character_count,
+            selected_characters_with_access_tokens,
             "Set Destination requested"
         );
-
-        if self.characters.is_empty() {
-            warn!("Set Destination requested with no characters added");
-            self.status_message = "Add at least one character first".to_string();
-            return;
-        }
 
         let options = WaypointOptions {
             add_to_beginning: self.pin_destination,
@@ -193,6 +201,10 @@ impl SetDestoApp {
         let mut failures = Vec::new();
 
         for index in 0..self.characters.len() {
+            if !self.characters[index].selected {
+                continue;
+            }
+
             let character_id = self.characters[index].character_id;
             let character_name = self.characters[index].character_name.clone();
             let result = self
@@ -230,8 +242,7 @@ impl SetDestoApp {
         } else {
             self.status_message = format!(
                 "Set destination for {successes}/{} characters; first error: {}",
-                self.characters.len(),
-                failures[0]
+                selected_character_count, failures[0]
             );
         }
     }
@@ -243,12 +254,74 @@ impl SetDestoApp {
         self.status_message = "Cleared".to_string();
     }
 
+    pub fn selected_character_count(&self) -> usize {
+        self.characters
+            .iter()
+            .filter(|character| character.selected)
+            .count()
+    }
+
+    pub fn set_character_selected(&mut self, character_id: u64, selected: bool) {
+        let Some(character) = self
+            .characters
+            .iter_mut()
+            .find(|character| character.character_id == character_id)
+        else {
+            warn!(character_id, "Cannot select unknown character");
+            return;
+        };
+
+        if character.selected == selected {
+            return;
+        }
+
+        character.selected = selected;
+        info!(
+            character_id,
+            character_name = %character.character_name,
+            selected,
+            "Updated character selection"
+        );
+        self.save_character_selection();
+    }
+
+    pub fn set_all_characters_selected(&mut self, selected: bool) {
+        for character in &mut self.characters {
+            character.selected = selected;
+        }
+        info!(
+            selected,
+            character_count = self.characters.len(),
+            "Updated all character selections"
+        );
+        self.save_character_selection();
+    }
+
+    pub fn invert_character_selection(&mut self) {
+        for character in &mut self.characters {
+            character.selected = !character.selected;
+        }
+        info!(
+            selected_character_count = self.selected_character_count(),
+            character_count = self.characters.len(),
+            "Inverted character selection"
+        );
+        self.save_character_selection();
+    }
+
     fn save_logged_in_character(&mut self, character: AuthenticatedCharacter) -> Result<()> {
         let expires_at = expires_at_from_now(character.expires_in);
+        let selected = self
+            .characters
+            .iter()
+            .find(|existing| existing.character_id == character.character_id)
+            .map(|existing| existing.selected)
+            .unwrap_or(true);
         let character_config = CharacterConfig {
             character_id: character.character_id,
             character_name: character.character_name.clone(),
             scopes: character.scopes.clone(),
+            selected,
         };
 
         info!(
@@ -277,6 +350,23 @@ impl SetDestoApp {
         );
 
         Ok(())
+    }
+
+    fn save_character_selection(&mut self) {
+        for character in &self.characters {
+            if let Some(config_character) =
+                self.config.characters.iter_mut().find(|config_character| {
+                    config_character.character_id == character.character_id
+                })
+            {
+                config_character.selected = character.selected;
+            }
+        }
+
+        if let Err(err) = self.config.save() {
+            error!(error = ?err, "Failed to save character selection");
+            self.status_message = format!("Failed to save character selection: {err}");
+        }
     }
 
     fn access_token_for_character(&mut self, index: usize) -> Result<String> {
@@ -340,6 +430,7 @@ pub struct CharacterState {
     pub character_id: u64,
     pub character_name: String,
     pub scopes: Vec<String>,
+    pub selected: bool,
     access_token: Option<String>,
     expires_at: Option<SystemTime>,
     refresh_token_saved: bool,
@@ -366,6 +457,7 @@ impl CharacterState {
             character_id: character.character_id,
             character_name: character.character_name,
             scopes: character.scopes,
+            selected: character.selected,
             access_token,
             expires_at,
             refresh_token_saved: true,
@@ -381,6 +473,7 @@ impl CharacterState {
             character_id: character.character_id,
             character_name: character.character_name,
             scopes: character.scopes,
+            selected: character.selected,
             access_token: Some(access_token),
             expires_at: Some(expires_at),
             refresh_token_saved: true,

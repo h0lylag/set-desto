@@ -49,13 +49,26 @@ fn render_notes_input(ui: &mut egui::Ui, app: &mut SetDestoApp) {
 }
 
 fn render_actions(ui: &mut egui::Ui, app: &mut SetDestoApp) {
+    let selected_character_count = app.selected_character_count();
+    let can_set_destination = !app.destination.trim().is_empty()
+        && selected_character_count > 0
+        && !app.characters.is_empty();
+
     ui.horizontal(|ui| {
-        if ui.button("Set Destination").clicked() {
+        if ui
+            .add_enabled(can_set_destination, egui::Button::new("Set Destination"))
+            .clicked()
+        {
             app.set_destination();
         }
 
         if ui.button("Clear").clicked() {
             app.clear_destination_form();
         }
+
+        ui.label(format!(
+            "{selected_character_count}/{} targets",
+            app.characters.len()
+        ));
     });
 }

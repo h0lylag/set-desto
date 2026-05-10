@@ -74,6 +74,8 @@ pub struct CharacterConfig {
     pub character_id: u64,
     pub character_name: String,
     pub scopes: Vec<String>,
+    #[serde(default = "default_character_selected")]
+    pub selected: bool,
 }
 
 pub fn config_path() -> Result<PathBuf> {
@@ -81,6 +83,10 @@ pub fn config_path() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("Could not determine platform config directory"))?;
 
     Ok(project_dirs.config_dir().join(CONFIG_FILE))
+}
+
+fn default_character_selected() -> bool {
+    true
 }
 
 #[cfg(test)]
@@ -94,16 +100,33 @@ mod tests {
             character_id: 42,
             character_name: "Old Name".to_string(),
             scopes: vec!["old.scope".to_string()],
+            selected: true,
         });
 
         config.upsert_character(CharacterConfig {
             character_id: 42,
             character_name: "New Name".to_string(),
             scopes: vec!["new.scope".to_string()],
+            selected: false,
         });
 
         assert_eq!(config.characters.len(), 1);
         assert_eq!(config.characters[0].character_name, "New Name");
         assert_eq!(config.characters[0].scopes, vec!["new.scope"]);
+        assert!(!config.characters[0].selected);
+    }
+
+    #[test]
+    fn missing_selected_defaults_to_true() {
+        let character: CharacterConfig = serde_json::from_str(
+            r#"{
+                "character_id": 42,
+                "character_name": "Test Pilot",
+                "scopes": []
+            }"#,
+        )
+        .expect("character config should deserialize");
+
+        assert!(character.selected);
     }
 }

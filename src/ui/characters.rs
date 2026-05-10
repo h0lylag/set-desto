@@ -22,11 +22,49 @@ pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
         return;
     }
 
-    for character in &app.characters {
+    ui.horizontal(|ui| {
+        ui.label(format!(
+            "{}/{} selected",
+            app.selected_character_count(),
+            app.characters.len()
+        ));
+
+        if ui.button("All").clicked() {
+            app.set_all_characters_selected(true);
+        }
+
+        if ui.button("None").clicked() {
+            app.set_all_characters_selected(false);
+        }
+
+        if ui.button("Invert").clicked() {
+            app.invert_character_selection();
+        }
+    });
+
+    ui.add_space(6.0);
+
+    for index in 0..app.characters.len() {
+        let (character_id, character_name, token_summary, mut selected) = {
+            let character = &app.characters[index];
+            (
+                character.character_id,
+                character.character_name.clone(),
+                character.token_summary(),
+                character.selected,
+            )
+        };
+        let mut selection_changed = false;
+
         ui.horizontal(|ui| {
-            ui.strong(&character.character_name);
-            ui.label(format!("ID {}", character.character_id));
-            ui.label(character.token_summary());
+            selection_changed = ui.checkbox(&mut selected, "").changed();
+            ui.strong(&character_name);
+            ui.label(format!("ID {character_id}"));
+            ui.label(token_summary);
         });
+
+        if selection_changed {
+            app.set_character_selected(character_id, selected);
+        }
     }
 }

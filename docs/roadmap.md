@@ -11,6 +11,7 @@ This is the remaining implementation plan from the current SSO proof of life to 
 - Access tokens are cached with an absolute expiry timestamp and reused until they are close to expiry.
 - Refresh tokens are persisted through the OS keyring and used to renew stale access tokens before ESI calls.
 - ESI waypoint calls are wired for numeric destination IDs and exact solar system/station names through ESI `/universe/ids/`.
+- Characters can be selected individually, and waypoint requests only target selected characters.
 
 ## 1. Cross-Platform Storage
 
@@ -26,6 +27,7 @@ Goal: persist characters safely across restarts without storing refresh tokens i
   - character ID
   - character name
   - granted scopes
+  - selected state
   - token/keyring entry identifier
 - Refresh tokens are stored only in the OS keyring.
 - Access tokens are cached in the OS keyring with expiry metadata so restarts do not force a refresh when the token is still valid.
@@ -106,8 +108,8 @@ Goal: let users set waypoints for selected groups of characters.
 - Add `domain::character`.
 - Add group metadata to config.
 - UI:
-  - authenticated character list
-  - selected/unselected state
+  - authenticated character list exists
+  - selected/unselected state exists
   - group creation/editing
   - batch result status
 - Keep groups as non-secret config data.
@@ -162,4 +164,4 @@ When adding files used by the Rust crate, make sure they are tracked by git befo
 
 ## Suggested Next Step
 
-Add character selection/groups so setting a destination does not always target every authenticated character.
+Add Remove Character/logout so stale pilots and keyring entries can be cleaned up from the app.
