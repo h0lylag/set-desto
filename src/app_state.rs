@@ -10,30 +10,16 @@ use crate::app_constants::MAX_CONCURRENT_WAYPOINT_SENDS;
 use crate::domain::destination;
 use crate::eve::auth::{self, AuthenticatedCharacter, LoginResult, SsoConfig};
 use crate::eve::waypoints::{self, WaypointOptions};
-use crate::storage::config::{AppConfig, CharacterConfig};
+use crate::storage::config::{AppConfig, CharacterConfig, FavoriteDestinationConfig};
 use crate::storage::tokens::{KeyringTokenStore, TokenStore};
 
 const ACCESS_TOKEN_REFRESH_BUFFER: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DestoMode {
-    Manual,
-    Clipboard,
-}
-
-impl DestoMode {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Manual => "Manual",
-            Self::Clipboard => "Clipboard",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AppTab {
     Destination,
     Characters,
+    Favorites,
     Esi,
 }
 
@@ -42,6 +28,7 @@ impl AppTab {
         match self {
             Self::Destination => "Set Destination",
             Self::Characters => "Characters",
+            Self::Favorites => "Favorites",
             Self::Esi => "ESI",
         }
     }
@@ -92,7 +79,7 @@ impl CharacterSendResult {
 pub struct ResolvedDestinationDisplay {
     pub name: String,
     pub id: i64,
-    pub kind_label: &'static str,
+    pub kind_label: String,
 }
 
 impl ResolvedDestinationDisplay {
@@ -100,7 +87,15 @@ impl ResolvedDestinationDisplay {
         Self {
             name: destination.name.clone(),
             id: destination.id,
-            kind_label: destination.kind.label(),
+            kind_label: destination.kind.label().to_string(),
+        }
+    }
+
+    fn from_favorite(favorite: &FavoriteDestination) -> Self {
+        Self {
+            name: favorite.destination_name.clone(),
+            id: favorite.destination_id,
+            kind_label: favorite.destination_kind.clone(),
         }
     }
 
@@ -110,6 +105,46 @@ impl ResolvedDestinationDisplay {
         }
 
         format!("{} ({}), {}", self.name, self.id, self.kind_label)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FavoriteDestination {
+    pub destination_id: i64,
+    pub destination_name: String,
+    pub destination_kind: String,
+}
+
+impl FavoriteDestination {
+    fn from_config(config: FavoriteDestinationConfig) -> Self {
+        Self {
+            destination_id: config.destination_id,
+            destination_name: config.destination_name,
+            destination_kind: config.destination_kind,
+        }
+    }
+
+    fn into_config(self) -> FavoriteDestinationConfig {
+        FavoriteDestinationConfig {
+            destination_id: self.destination_id,
+            destination_name: self.destination_name,
+            destination_kind: self.destination_kind,
+        }
+    }
+
+    fn from_resolved(destination: &ResolvedDestinationDisplay) -> Self {
+        Self {
+            destination_id: destination.id,
+            destination_name: destination.name.clone(),
+            destination_kind: destination.kind_label.clone(),
+        }
+    }
+
+    pub fn summary(&self) -> String {
+        format!(
+            "{} ({}) - {}",
+            self.destination_name, self.destination_id, self.destination_kind
+        )
     }
 }
 
@@ -260,8 +295,9 @@ pub struct SetDestoApp {
     pub active_tab: AppTab,
     pub characters: Vec<CharacterState>,
     pub destination: String,
+    pub favorite_destination_input: String,
+    pub favorites: Vec<FavoriteDestination>,
     pub pin_destination: bool,
-    pub mode: DestoMode,
     pub status_message: String,
     pub esi_client_id: String,
     last_resolved_destination: Option<ResolvedDestinationDisplay>,
@@ -299,6 +335,12 @@ impl SetDestoApp {
         };
         let token_store = KeyringTokenStore;
         let esi_client_id = config.esi.client_id.clone();
+        let favorites = config
+            .favorites
+            .iter()
+            .cloned()
+            .map(FavoriteDestination::from_config)
+            .collect();
         let characters = config
             .characters
             .iter()
@@ -311,8 +353,9 @@ impl SetDestoApp {
             active_tab: AppTab::Destination,
             characters,
             destination: String::new(),
+            favorite_destination_input: String::new(),
+            favorites,
             pin_destination: false,
-            mode: DestoMode::Manual,
             status_message,
             esi_client_id,
             last_resolved_destination: None,
@@ -351,6 +394,16 @@ impl SetDestoApp {
 
     pub fn clear_resolved_destination(&mut self) {
         self.last_resolved_destination = None;
+    }
+
+    pub fn has_resolved_destination(&self) -> bool {
+        self.last_resolved_destination.is_some()
+    }
+
+    pub fn favorite_send_enabled(&self) -> bool {
+        !self.waypoint_send_in_progress()
+            && !self.characters.is_empty()
+            && self.selected_character_count() > 0
     }
 
     pub fn failed_send_count(&self) -> usize {
@@ -441,6 +494,92 @@ impl SetDestoApp {
 
     pub fn mark_redirect_uri_copied(&mut self) {
         self.status_message = "Copied redirect URI".to_string();
+    }
+
+    pub fn add_favorite_from_input(&mut self) {
+        let destination = self.favorite_destination_input.trim().to_string();
+        if destination.is_empty() {
+            self.status_message = "Favorite destination required".to_string();
+            return;
+        }
+
+        let resolved_destination = match destination::resolve(&destination) {
+            Ok(destination) => destination,
+            Err(err) => {
+                warn!(destination = %destination, error = ?err, "Favorite resolution failed");
+                self.status_message = err.to_string();
+                return;
+            }
+        };
+        let favorite = FavoriteDestination::from_resolved(
+            &ResolvedDestinationDisplay::from_resolved(&resolved_destination),
+        );
+
+        if self.save_favorite(favorite).is_ok() {
+            self.favorite_destination_input.clear();
+        }
+    }
+
+    pub fn add_resolved_destination_to_favorites(&mut self) {
+        let Some(destination) = &self.last_resolved_destination else {
+            self.status_message = "Resolve or send a destination before adding it".to_string();
+            return;
+        };
+
+        let favorite = FavoriteDestination::from_resolved(destination);
+        let _ = self.save_favorite(favorite);
+    }
+
+    pub fn remove_favorite_destination(&mut self, destination_id: i64) {
+        let Some(favorite_name) = self
+            .favorites
+            .iter()
+            .find(|favorite| favorite.destination_id == destination_id)
+            .map(|favorite| favorite.destination_name.clone())
+        else {
+            self.status_message = "Favorite destination not found".to_string();
+            return;
+        };
+
+        let mut config = self.config.clone();
+        if config.remove_favorite(destination_id).is_none() {
+            self.status_message = "Favorite destination not found".to_string();
+            return;
+        }
+
+        match config.save() {
+            Ok(()) => {
+                self.config = config;
+                self.sync_favorites_from_config();
+                self.status_message = format!("Removed favorite {favorite_name}");
+            }
+            Err(err) => {
+                error!(destination_id, error = ?err, "Failed to remove favorite");
+                self.status_message = format!("Failed to remove favorite: {err}");
+            }
+        }
+    }
+
+    pub fn set_favorite_destination(&mut self, destination_id: i64) {
+        if self.waypoint_send_in_progress() {
+            debug!("Ignoring favorite destination because a waypoint send is already in progress");
+            self.status_message = "Waypoint send already in progress".to_string();
+            return;
+        }
+
+        let Some(favorite) = self
+            .favorites
+            .iter()
+            .find(|favorite| favorite.destination_id == destination_id)
+            .cloned()
+        else {
+            self.status_message = "Favorite destination not found".to_string();
+            return;
+        };
+
+        self.destination = favorite.destination_name.clone();
+        let resolved_destination = ResolvedDestinationDisplay::from_favorite(&favorite);
+        self.send_resolved_destination(resolved_destination, &favorite.destination_name);
     }
 
     pub fn start_character_login(&mut self) {
@@ -561,11 +700,38 @@ impl SetDestoApp {
                 return;
             }
         };
-        self.last_resolved_destination = Some(ResolvedDestinationDisplay::from_resolved(
-            &resolved_destination,
-        ));
-        let destination_id = resolved_destination.id;
+        self.send_resolved_destination(
+            ResolvedDestinationDisplay::from_resolved(&resolved_destination),
+            &destination,
+        );
+    }
 
+    fn send_resolved_destination(
+        &mut self,
+        resolved_destination: ResolvedDestinationDisplay,
+        destination: &str,
+    ) {
+        if self.waypoint_send_in_progress() {
+            debug!("Ignoring Set Destination because a waypoint send is already in progress");
+            self.status_message = "Waypoint send already in progress".to_string();
+            return;
+        }
+
+        if self.characters.is_empty() {
+            warn!("Set Destination requested with no characters added");
+            self.status_message = "Add at least one character first".to_string();
+            return;
+        }
+
+        let selected_character_count = self.selected_character_count();
+        if selected_character_count == 0 {
+            warn!("Set Destination requested with no selected characters");
+            self.status_message = "Select at least one character".to_string();
+            return;
+        }
+
+        self.last_resolved_destination = Some(resolved_destination.clone());
+        let destination_id = resolved_destination.id;
         let selected_characters_with_access_tokens = self
             .characters
             .iter()
@@ -573,11 +739,10 @@ impl SetDestoApp {
             .count();
         info!(
             destination = %destination,
-            mode = ?self.mode,
             pinned = self.pin_destination,
             destination_id,
             destination_name = %resolved_destination.name,
-            destination_kind = resolved_destination.kind.label(),
+            destination_kind = %resolved_destination.kind_label,
             character_count = self.characters.len(),
             selected_character_count,
             selected_characters_with_access_tokens,
@@ -1100,6 +1265,31 @@ impl SetDestoApp {
             error!(error = ?err, "Failed to save character selection");
             self.status_message = format!("Failed to save character selection: {err}");
         }
+    }
+
+    fn save_favorite(&mut self, favorite: FavoriteDestination) -> Result<()> {
+        let favorite_name = favorite.destination_name.clone();
+        let favorite_id = favorite.destination_id;
+        let mut config = self.config.clone();
+        config.upsert_favorite(favorite.into_config());
+        config
+            .save()
+            .with_context(|| format!("Failed to save favorite {favorite_name}"))?;
+
+        self.config = config;
+        self.sync_favorites_from_config();
+        self.status_message = format!("Saved favorite {favorite_name} ({favorite_id})");
+        Ok(())
+    }
+
+    fn sync_favorites_from_config(&mut self) {
+        self.favorites = self
+            .config
+            .favorites
+            .iter()
+            .cloned()
+            .map(FavoriteDestination::from_config)
+            .collect();
     }
 }
 

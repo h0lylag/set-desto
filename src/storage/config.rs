@@ -14,6 +14,8 @@ pub struct AppConfig {
     pub esi: EsiConfig,
     #[serde(default)]
     pub characters: Vec<CharacterConfig>,
+    #[serde(default)]
+    pub favorites: Vec<FavoriteDestinationConfig>,
 }
 
 impl AppConfig {
@@ -78,6 +80,27 @@ impl AppConfig {
 
         Some(self.characters.remove(index))
     }
+
+    pub fn upsert_favorite(&mut self, favorite: FavoriteDestinationConfig) {
+        if let Some(existing) = self
+            .favorites
+            .iter_mut()
+            .find(|existing| existing.destination_id == favorite.destination_id)
+        {
+            *existing = favorite;
+        } else {
+            self.favorites.push(favorite);
+        }
+    }
+
+    pub fn remove_favorite(&mut self, destination_id: i64) -> Option<FavoriteDestinationConfig> {
+        let index = self
+            .favorites
+            .iter()
+            .position(|favorite| favorite.destination_id == destination_id)?;
+
+        Some(self.favorites.remove(index))
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -93,6 +116,13 @@ pub struct CharacterConfig {
     pub scopes: Vec<String>,
     #[serde(default = "default_character_selected")]
     pub selected: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct FavoriteDestinationConfig {
+    pub destination_id: i64,
+    pub destination_name: String,
+    pub destination_kind: String,
 }
 
 pub fn config_path() -> Result<PathBuf> {
@@ -157,6 +187,55 @@ mod tests {
         .expect("app config should deserialize");
 
         assert!(config.esi.client_id.is_empty());
+    }
+
+    #[test]
+    fn missing_favorites_defaults_to_empty_list() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{
+                "characters": []
+            }"#,
+        )
+        .expect("app config should deserialize");
+
+        assert!(config.favorites.is_empty());
+    }
+
+    #[test]
+    fn upsert_favorite_replaces_existing_destination() {
+        let mut config = AppConfig::default();
+        config.upsert_favorite(FavoriteDestinationConfig {
+            destination_id: 30000142,
+            destination_name: "Old Jita".to_string(),
+            destination_kind: "solar system".to_string(),
+        });
+
+        config.upsert_favorite(FavoriteDestinationConfig {
+            destination_id: 30000142,
+            destination_name: "Jita".to_string(),
+            destination_kind: "solar system".to_string(),
+        });
+
+        assert_eq!(config.favorites.len(), 1);
+        assert_eq!(config.favorites[0].destination_name, "Jita");
+    }
+
+    #[test]
+    fn remove_favorite_returns_removed_destination() {
+        let mut config = AppConfig::default();
+        config.upsert_favorite(FavoriteDestinationConfig {
+            destination_id: 30000142,
+            destination_name: "Jita".to_string(),
+            destination_kind: "solar system".to_string(),
+        });
+
+        let removed = config
+            .remove_favorite(30000142)
+            .expect("favorite should be removed");
+
+        assert_eq!(removed.destination_name, "Jita");
+        assert!(config.favorites.is_empty());
+        assert!(config.remove_favorite(30000142).is_none());
     }
 
     #[test]

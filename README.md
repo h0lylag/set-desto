@@ -27,7 +27,7 @@ Open the ESI tab and save your EVE application Client ID. The tab shows the redi
 
 Character metadata is stored in the platform config directory. Access and refresh tokens are stored in the OS keyring: Secret Service on Linux and Windows Credential Manager on Windows. Access tokens are reused until they are close to expiry, then refreshed with the saved refresh token.
 
-Manual destinations can be entered as numeric ESI IDs or exact solar system/station names. Name lookup uses ESI `/universe/ids/` before sending waypoint requests.
+Destinations can be entered as numeric ESI IDs or exact solar system/station names. Name lookup uses ESI `/universe/ids/` before sending waypoint requests.
 
 Characters can be selected individually; Set Destination only targets selected characters. Character management lives in its own tab for adding pilots, reviewing token status, selection, and removal.
 

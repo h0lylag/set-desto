@@ -5,7 +5,7 @@ This is the remaining implementation plan from the current SSO proof of life to 
 ## Current State
 
 - Egui app scaffold is in place.
-- Manual and Clipboard destination modes exist, with Clipboard still a stub.
+- Destination entry supports numeric ESI IDs and exact solar system/station names.
 - EVE SSO Authorization Code with PKCE works through a loopback callback.
 - Add Character can authenticate a character, save non-secret metadata to config, and persist tokens in the OS keyring.
 - Access tokens are cached with an absolute expiry timestamp and reused until they are close to expiry.
@@ -127,7 +127,7 @@ Goal: keep the app simple but operational.
   - a destination is present
   - at least one character is selected
   - destination has resolved
-- Keep Clipboard as a stub until destination parsing is ready.
+- Destination parsing is currently focused on direct entry and saved favorites.
 - Add friendly errors for:
   - redirect URI mismatch
   - port already in use

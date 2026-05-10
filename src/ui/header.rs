@@ -28,6 +28,11 @@ pub fn render(ctx: &egui::Context, app: &mut SetDestoApp) {
                 AppTab::Characters,
                 AppTab::Characters.label(),
             );
+            ui.selectable_value(
+                &mut app.active_tab,
+                AppTab::Favorites,
+                AppTab::Favorites.label(),
+            );
             ui.selectable_value(&mut app.active_tab, AppTab::Esi, AppTab::Esi.label());
         });
     });
