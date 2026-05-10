@@ -3,6 +3,12 @@ use eframe::egui;
 use crate::app_state::{DestoMode, SetDestoApp};
 
 pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
+    ui.heading("Set Destination");
+
+    ui.add_space(8.0);
+    render_target_summary(ui, app);
+
+    ui.add_space(16.0);
     render_mode_selector(ui, app);
 
     ui.add_space(16.0);
@@ -12,10 +18,17 @@ pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
     ui.checkbox(&mut app.pin_destination, "Pin destination");
 
     ui.add_space(16.0);
-    render_notes_input(ui, app);
-
-    ui.add_space(16.0);
     render_actions(ui, app);
+}
+
+fn render_target_summary(ui: &mut egui::Ui, app: &SetDestoApp) {
+    ui.horizontal(|ui| {
+        ui.label(format!(
+            "{}/{} selected targets",
+            app.selected_character_count(),
+            app.characters.len()
+        ));
+    });
 }
 
 fn render_mode_selector(ui: &mut egui::Ui, app: &mut SetDestoApp) {
@@ -35,15 +48,6 @@ fn render_destination_input(ui: &mut egui::Ui, app: &mut SetDestoApp) {
     ui.add(
         egui::TextEdit::singleline(&mut app.destination)
             .hint_text("System, station, or structure")
-            .desired_width(f32::INFINITY),
-    );
-}
-
-fn render_notes_input(ui: &mut egui::Ui, app: &mut SetDestoApp) {
-    ui.label("Notes");
-    ui.add(
-        egui::TextEdit::multiline(&mut app.notes)
-            .desired_rows(6)
             .desired_width(f32::INFINITY),
     );
 }

@@ -30,7 +30,7 @@ Character metadata is stored in the platform config directory. Access and refres
 
 Manual destinations can be entered as numeric ESI IDs or exact solar system/station names. Name lookup uses ESI `/universe/ids/` before sending waypoint requests.
 
-Characters can be selected individually; Set Destination only targets selected characters.
+Characters can be selected individually; Set Destination only targets selected characters. Character management lives in its own tab for adding pilots, reviewing token status, selection, and removal.
 
 ## Build
 

@@ -12,6 +12,7 @@ This is the remaining implementation plan from the current SSO proof of life to 
 - Refresh tokens are persisted through the OS keyring and used to renew stale access tokens before ESI calls.
 - ESI waypoint calls are wired for numeric destination IDs and exact solar system/station names through ESI `/universe/ids/`.
 - Characters can be selected individually, and waypoint requests only target selected characters.
+- Character management has its own tab for adding, selecting, inspecting token state, and removing characters.
 
 ## 1. Cross-Platform Storage
 
@@ -33,7 +34,7 @@ Goal: persist characters safely across restarts without storing refresh tokens i
 - Access tokens are cached in the OS keyring with expiry metadata so restarts do not force a refresh when the token is still valid.
 - Add remove/logout behavior:
   - delete character metadata
-  - delete keyring refresh token
+  - delete keyring access and refresh tokens
   - optionally call EVE SSO revoke endpoint
 
 ## 2. Token Manager
@@ -110,6 +111,7 @@ Goal: let users set waypoints for selected groups of characters.
 - UI:
   - authenticated character list exists
   - selected/unselected state exists
+  - character management tab exists
   - group creation/editing
   - batch result status
 - Keep groups as non-secret config data.
@@ -164,4 +166,4 @@ When adding files used by the Rust crate, make sure they are tracked by git befo
 
 ## Suggested Next Step
 
-Add Remove Character/logout so stale pilots and keyring entries can be cleaned up from the app.
+Add per-character send result state so the UI can show which pilots succeeded or failed after each waypoint request.

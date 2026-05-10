@@ -28,14 +28,30 @@ impl DestoMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppTab {
+    Destination,
+    Characters,
+}
+
+impl AppTab {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Destination => "Set Destination",
+            Self::Characters => "Characters",
+        }
+    }
+}
+
 pub struct SetDestoApp {
     pub debug_mode: bool,
+    pub active_tab: AppTab,
     pub characters: Vec<CharacterState>,
     pub destination: String,
-    pub notes: String,
     pub pin_destination: bool,
     pub mode: DestoMode,
     pub status_message: String,
+    pub pending_remove_character_id: Option<u64>,
     config: AppConfig,
     login_receiver: Option<Receiver<LoginResult>>,
     token_store: KeyringTokenStore,
@@ -73,12 +89,13 @@ impl SetDestoApp {
 
         Self {
             debug_mode,
+            active_tab: AppTab::Destination,
             characters,
             destination: String::new(),
-            notes: String::new(),
             pin_destination: false,
             mode: DestoMode::Manual,
             status_message,
+            pending_remove_character_id: None,
             config,
             login_receiver: None,
             token_store,
@@ -249,7 +266,6 @@ impl SetDestoApp {
 
     pub fn clear_destination_form(&mut self) {
         self.destination.clear();
-        self.notes.clear();
         self.pin_destination = false;
         self.status_message = "Cleared".to_string();
     }
@@ -309,6 +325,41 @@ impl SetDestoApp {
         self.save_character_selection();
     }
 
+    pub fn request_remove_character(&mut self, character_id: u64) {
+        let Some(character) = self
+            .characters
+            .iter()
+            .find(|character| character.character_id == character_id)
+        else {
+            warn!(character_id, "Cannot remove unknown character");
+            return;
+        };
+
+        info!(
+            character_id,
+            character_name = %character.character_name,
+            "Character removal confirmation requested"
+        );
+        self.pending_remove_character_id = Some(character_id);
+    }
+
+    pub fn cancel_remove_character(&mut self) {
+        self.pending_remove_character_id = None;
+    }
+
+    pub fn confirm_remove_character(&mut self, character_id: u64) {
+        match self.remove_character(character_id) {
+            Ok(character_name) => {
+                info!(character_id, character_name, "Removed character");
+                self.status_message = format!("Removed {character_name}");
+            }
+            Err(err) => {
+                error!(character_id, error = ?err, "Failed to remove character");
+                self.status_message = format!("Failed to remove character: {err}");
+            }
+        }
+    }
+
     fn save_logged_in_character(&mut self, character: AuthenticatedCharacter) -> Result<()> {
         let expires_at = expires_at_from_now(character.expires_in);
         let selected = self
@@ -350,6 +401,39 @@ impl SetDestoApp {
         );
 
         Ok(())
+    }
+
+    fn remove_character(&mut self, character_id: u64) -> Result<String> {
+        let character_name = self
+            .characters
+            .iter()
+            .find(|character| character.character_id == character_id)
+            .map(|character| character.character_name.clone())
+            .ok_or_else(|| anyhow!("Character {character_id} was not found"))?;
+
+        self.token_store
+            .delete_access_token(character_id)
+            .with_context(|| format!("Failed to delete access token for {character_name}"))?;
+        self.token_store
+            .delete_refresh_token(character_id)
+            .with_context(|| format!("Failed to delete refresh token for {character_name}"))?;
+
+        let mut config = self.config.clone();
+        config
+            .remove_character(character_id)
+            .ok_or_else(|| anyhow!("Character {character_id} was missing from config"))?;
+        config
+            .save()
+            .context("Failed to save character metadata after removal")?;
+        self.config = config;
+
+        self.characters
+            .retain(|character| character.character_id != character_id);
+        if self.pending_remove_character_id == Some(character_id) {
+            self.pending_remove_character_id = None;
+        }
+
+        Ok(character_name)
     }
 
     fn save_character_selection(&mut self) {

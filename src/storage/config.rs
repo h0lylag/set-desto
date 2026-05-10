@@ -67,6 +67,15 @@ impl AppConfig {
             self.characters.push(character);
         }
     }
+
+    pub fn remove_character(&mut self, character_id: u64) -> Option<CharacterConfig> {
+        let index = self
+            .characters
+            .iter()
+            .position(|character| character.character_id == character_id)?;
+
+        Some(self.characters.remove(index))
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -128,5 +137,24 @@ mod tests {
         .expect("character config should deserialize");
 
         assert!(character.selected);
+    }
+
+    #[test]
+    fn remove_character_returns_removed_character() {
+        let mut config = AppConfig::default();
+        config.upsert_character(CharacterConfig {
+            character_id: 42,
+            character_name: "Test Pilot".to_string(),
+            scopes: Vec::new(),
+            selected: true,
+        });
+
+        let removed = config
+            .remove_character(42)
+            .expect("character should be removed");
+
+        assert_eq!(removed.character_name, "Test Pilot");
+        assert!(config.characters.is_empty());
+        assert!(config.remove_character(42).is_none());
     }
 }
