@@ -402,6 +402,10 @@ impl SetDestoApp {
         }
     }
 
+    pub fn mark_redirect_uri_copied(&mut self) {
+        self.status_message = "Copied redirect URI".to_string();
+    }
+
     pub fn start_character_login(&mut self) {
         if self.login_in_progress() {
             debug!("Ignoring Add Character click because login is already in progress");

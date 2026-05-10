@@ -24,7 +24,15 @@ pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
 
     ui.add_space(16.0);
     ui.label("Redirect URI");
-    ui.monospace(app.effective_redirect_uri());
+    ui.horizontal(|ui| {
+        let redirect_uri = app.effective_redirect_uri();
+        ui.monospace(&redirect_uri);
+
+        if ui.button("Copy").clicked() {
+            ui.ctx().copy_text(redirect_uri);
+            app.mark_redirect_uri_copied();
+        }
+    });
 }
 
 fn settings_status(app: &SetDestoApp) -> &'static str {

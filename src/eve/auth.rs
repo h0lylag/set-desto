@@ -1,5 +1,5 @@
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{SocketAddr, TcpListener};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -83,23 +83,7 @@ fn run_login(config: SsoConfig) -> Result<AuthenticatedCharacter> {
         .context("Failed to build HTTP client")?;
 
     let metadata = fetch_metadata(&client)?;
-    let redirect_url = Url::parse(&config.redirect_uri).context("Invalid EVE SSO redirect URI")?;
-    let bind_addr = redirect_url
-        .socket_addrs(|| Some(80))
-        .context("Redirect URI must resolve to a local socket address")?
-        .into_iter()
-        .next()
-        .ok_or_else(|| anyhow!("Redirect URI did not include a usable host and port"))?;
-    if !bind_addr.ip().is_loopback() {
-        bail!("EVE SSO redirect URI must use a loopback address");
-    }
-
-    let listener = TcpListener::bind(bind_addr)
-        .with_context(|| format!("Failed to listen for EVE SSO callback on {bind_addr}"))?;
-    listener
-        .set_nonblocking(true)
-        .context("Failed to configure callback listener")?;
-    info!(bind_addr = %bind_addr, "Listening for EVE SSO callback");
+    let listener = bind_callback_listener(&config.redirect_uri)?;
 
     let state = random_url_token(32);
     let code_verifier = random_url_token(32);
@@ -124,6 +108,33 @@ fn fetch_metadata(client: &Client) -> Result<SsoMetadata> {
         .context("EVE SSO metadata request failed")?
         .json()
         .context("Failed to parse EVE SSO metadata")
+}
+
+fn bind_callback_listener(redirect_uri: &str) -> Result<TcpListener> {
+    let bind_addr = callback_bind_addr(redirect_uri)?;
+    let listener = TcpListener::bind(bind_addr)
+        .with_context(|| format!("Failed to listen for EVE SSO callback on {bind_addr}"))?;
+    listener
+        .set_nonblocking(true)
+        .context("Failed to configure callback listener")?;
+    info!(bind_addr = %bind_addr, "Listening for EVE SSO callback");
+
+    Ok(listener)
+}
+
+fn callback_bind_addr(redirect_uri: &str) -> Result<SocketAddr> {
+    let redirect_url = Url::parse(redirect_uri).context("Invalid EVE SSO redirect URI")?;
+    let bind_addr = redirect_url
+        .socket_addrs(|| Some(80))
+        .context("Redirect URI must resolve to a local socket address")?
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("Redirect URI did not include a usable host and port"))?;
+    if !bind_addr.ip().is_loopback() {
+        bail!("EVE SSO redirect URI must use a loopback address");
+    }
+
+    Ok(bind_addr)
 }
 
 fn build_authorize_url(
@@ -466,6 +477,24 @@ mod tests {
         let claims = parse_access_token_claims(&token).expect("claims should parse");
 
         assert_eq!(claims.name, "Character 2112625428");
+    }
+
+    #[test]
+    fn builds_sso_config_from_trimmed_client_id() {
+        let config =
+            SsoConfig::from_client_id(" test-client-id ").expect("client id should produce config");
+
+        assert_eq!(config.client_id, "test-client-id");
+        assert_eq!(config.redirect_uri, DEFAULT_REDIRECT_URI);
+    }
+
+    #[test]
+    fn rejects_empty_sso_client_id() {
+        let error = SsoConfig::from_client_id(" ")
+            .expect_err("empty client id should be rejected")
+            .to_string();
+
+        assert!(error.contains("Client ID"));
     }
 
     fn unsigned_test_token(payload: serde_json::Value) -> String {

@@ -23,7 +23,7 @@ Then run Set Desto:
 cargo run
 ```
 
-Open the ESI tab and save your EVE application Client ID. You can override the callback URL with `SET_DESTO_EVE_REDIRECT_URI`, but it must also be registered with EVE SSO and use a loopback address.
+Open the ESI tab and save your EVE application Client ID. The tab shows the redirect URI to register with EVE SSO and includes a copy button. You can override the callback URL with `SET_DESTO_EVE_REDIRECT_URI`, but it must also be registered with EVE SSO and use a loopback address.
 
 Character metadata is stored in the platform config directory. Access and refresh tokens are stored in the OS keyring: Secret Service on Linux and Windows Credential Manager on Windows. Access tokens are reused until they are close to expiry, then refreshed with the saved refresh token.
 
