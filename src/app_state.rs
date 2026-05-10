@@ -302,6 +302,7 @@ pub struct SetDestoApp {
     pub esi_client_id: String,
     last_resolved_destination: Option<ResolvedDestinationDisplay>,
     pub pending_remove_character_id: Option<u64>,
+    pub pending_remove_favorite_destination_id: Option<i64>,
     config: AppConfig,
     login_receiver: Option<Receiver<LoginResult>>,
     waypoint_send_receiver: Option<Receiver<WaypointSendEvent>>,
@@ -360,6 +361,7 @@ impl SetDestoApp {
             esi_client_id,
             last_resolved_destination: None,
             pending_remove_character_id: None,
+            pending_remove_favorite_destination_id: None,
             config,
             login_receiver: None,
             waypoint_send_receiver: None,
@@ -530,7 +532,26 @@ impl SetDestoApp {
         let _ = self.save_favorite(favorite);
     }
 
-    pub fn remove_favorite_destination(&mut self, destination_id: i64) {
+    pub fn request_remove_favorite_destination(&mut self, destination_id: i64) {
+        let Some(favorite_name) = self
+            .favorites
+            .iter()
+            .find(|favorite| favorite.destination_id == destination_id)
+            .map(|favorite| favorite.destination_name.clone())
+        else {
+            self.status_message = "Favorite destination not found".to_string();
+            return;
+        };
+
+        self.pending_remove_favorite_destination_id = Some(destination_id);
+        self.status_message = format!("Confirm removal of favorite {favorite_name}");
+    }
+
+    pub fn cancel_remove_favorite_destination(&mut self) {
+        self.pending_remove_favorite_destination_id = None;
+    }
+
+    pub fn confirm_remove_favorite_destination(&mut self, destination_id: i64) {
         let Some(favorite_name) = self
             .favorites
             .iter()
@@ -551,6 +572,7 @@ impl SetDestoApp {
             Ok(()) => {
                 self.config = config;
                 self.sync_favorites_from_config();
+                self.pending_remove_favorite_destination_id = None;
                 self.status_message = format!("Removed favorite {favorite_name}");
             }
             Err(err) => {
@@ -1270,6 +1292,15 @@ impl SetDestoApp {
     fn save_favorite(&mut self, favorite: FavoriteDestination) -> Result<()> {
         let favorite_name = favorite.destination_name.clone();
         let favorite_id = favorite.destination_id;
+        if self
+            .favorites
+            .iter()
+            .any(|existing| existing.destination_id == favorite_id)
+        {
+            self.status_message = format!("{favorite_name} is already a favorite");
+            return Ok(());
+        }
+
         let mut config = self.config.clone();
         config.upsert_favorite(favorite.into_config());
         config
@@ -1290,6 +1321,12 @@ impl SetDestoApp {
             .cloned()
             .map(FavoriteDestination::from_config)
             .collect();
+        self.favorites.sort_by(|left, right| {
+            left.destination_name
+                .to_lowercase()
+                .cmp(&right.destination_name.to_lowercase())
+                .then_with(|| left.destination_id.cmp(&right.destination_id))
+        });
     }
 }
 
