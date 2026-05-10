@@ -4,7 +4,7 @@ use anyhow::Result;
 use eframe::egui;
 use tracing::{error, info};
 
-use crate::eve::auth::{LoginResult, SsoConfig};
+use crate::eve::sso::{LoginResult, SsoConfig};
 use crate::storage::config::AppConfig;
 use crate::storage::tokens::KeyringTokenStore;
 

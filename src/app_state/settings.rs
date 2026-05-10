@@ -1,6 +1,6 @@
 use tracing::{error, info};
 
-use crate::eve::auth;
+use crate::eve::sso;
 
 use super::SetDestoApp;
 
@@ -15,7 +15,7 @@ impl SetDestoApp {
     }
 
     pub fn effective_redirect_uri(&self) -> String {
-        auth::redirect_uri()
+        sso::redirect_uri()
     }
 
     pub fn save_esi_settings(&mut self) {

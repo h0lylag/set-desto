@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use tracing::{debug, error, info, warn};
 
-use crate::eve::auth::{self, AuthenticatedCharacter};
+use crate::eve::sso::{self, AuthenticatedCharacter};
 use crate::storage::config::CharacterConfig;
 use crate::storage::tokens::TokenStore;
 
@@ -32,7 +32,7 @@ impl SetDestoApp {
 
         info!(redirect_uri = %config.redirect_uri, "Starting EVE SSO login");
         self.status_message = "Opening EVE SSO login...".to_string();
-        self.login_receiver = Some(auth::start_login(config));
+        self.login_receiver = Some(sso::start_login(config));
     }
 
     pub fn poll_character_login(&mut self) {

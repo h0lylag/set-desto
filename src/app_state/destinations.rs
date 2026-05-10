@@ -4,7 +4,7 @@ use anyhow::{Error, Result, bail};
 use tracing::{debug, info, warn};
 
 use crate::domain::destination;
-use crate::eve::{auth, waypoints::WaypointOptions};
+use crate::eve::{sso, waypoints::WaypointOptions};
 use crate::storage::tokens::TokenStore;
 
 use super::SetDestoApp;
@@ -264,7 +264,7 @@ impl SetDestoApp {
 
         let sso_config = self.sso_config()?;
         let refresh_token = self.token_store.load_refresh_token(character_id)?;
-        let refreshed = auth::refresh_access_token(&sso_config, &refresh_token)?;
+        let refreshed = sso::refresh_access_token(&sso_config, &refresh_token)?;
 
         if refreshed.character_id != character_id {
             bail!(
@@ -314,7 +314,7 @@ fn access_token_is_fresh(access_token: &Option<String>, expires_at: Option<Syste
 }
 
 fn missing_structure_scopes(scopes: &[String]) -> Vec<&'static str> {
-    [auth::SCOPE_SEARCH_STRUCTURES, auth::SCOPE_READ_STRUCTURES]
+    [sso::SCOPE_SEARCH_STRUCTURES, sso::SCOPE_READ_STRUCTURES]
         .into_iter()
         .filter(|scope| !scopes.iter().any(|existing| existing == scope))
         .collect()

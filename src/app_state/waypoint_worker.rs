@@ -6,7 +6,7 @@ use anyhow::{Result, anyhow, bail};
 use tracing::{debug, error, info};
 
 use crate::app_constants::MAX_CONCURRENT_WAYPOINT_SENDS;
-use crate::eve::{auth, waypoints};
+use crate::eve::{sso, waypoints};
 use crate::storage::tokens::TokenStore;
 
 use super::models::{
@@ -87,7 +87,7 @@ fn access_token_for_job(job: &WaypointSendJob) -> Result<(String, Option<AccessT
     );
 
     let refresh_token = job.token_store.load_refresh_token(job.character_id)?;
-    let refreshed = auth::refresh_access_token(&job.sso_config, &refresh_token)?;
+    let refreshed = sso::refresh_access_token(&job.sso_config, &refresh_token)?;
 
     if refreshed.character_id != job.character_id {
         bail!(

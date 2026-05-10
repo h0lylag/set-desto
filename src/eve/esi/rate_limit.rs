@@ -4,39 +4,23 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use reqwest::StatusCode;
-use reqwest::blocking::{Client, RequestBuilder, Response};
-use reqwest::header::{HeaderMap, HeaderValue};
+use reqwest::blocking::{RequestBuilder, Response};
+use reqwest::header::HeaderMap;
 use tracing::{debug, warn};
 
-pub const DATASOURCE: &str = "tranquility";
-pub const ESI_BASE_URL: &str = "https://esi.evetech.net/latest";
-pub const LANGUAGE: &str = "en";
-
-const COMPATIBILITY_DATE: &str = "2026-05-10";
 const MAX_RATE_LIMIT_RETRIES: usize = 2;
 const MAX_AUTO_WAIT: Duration = Duration::from_secs(5);
 const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(5);
+const LOW_BUCKET_COOLDOWN: Duration = Duration::from_secs(1);
 const ERROR_LIMIT_PAUSE_THRESHOLD: u64 = 5;
 const RATE_LIMIT_WARN_THRESHOLD: u64 = 10;
 
 static RATE_LIMIT_STATE: OnceLock<Mutex<RateLimitState>> = OnceLock::new();
 static REQUEST_GATE: OnceLock<Mutex<()>> = OnceLock::new();
 
-pub fn client() -> Result<Client> {
-    Client::builder()
-        .user_agent(user_agent())
-        .default_headers(default_headers())
-        .build()
-        .context("Failed to build ESI HTTP client")
-}
-
-pub fn error_body(response: Response) -> String {
-    response
-        .text()
-        .unwrap_or_else(|_| "failed to read ESI error body".to_string())
-}
-
-pub fn send_with_rate_limit(request: RequestBuilder, operation: &str) -> Result<Response> {
+pub(super) fn send(request: RequestBuilder, operation: &str) -> Result<Response> {
+    // ESI now has both the older global error limit and newer per-route token buckets.
+    // Keep outbound requests serialized so concurrent waypoint workers share one cooldown view.
     let _request_gate = request_gate()
         .lock()
         .expect("ESI request gate mutex poisoned");
@@ -73,19 +57,6 @@ pub fn send_with_rate_limit(request: RequestBuilder, operation: &str) -> Result<
     }
 
     bail!("ESI request for {operation} exhausted rate-limit retries")
-}
-
-fn user_agent() -> String {
-    format!("set-desto/{}", env!("CARGO_PKG_VERSION"))
-}
-
-fn default_headers() -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        "X-Compatibility-Date",
-        HeaderValue::from_static(COMPATIBILITY_DATE),
-    );
-    headers
 }
 
 fn rate_limit_decision(operation: &str, response: &Response) -> Result<RateLimitDecision> {
@@ -160,6 +131,7 @@ fn inspect_bucket_limit_headers(operation: &str, response: &Response) {
     );
 
     if remaining <= RATE_LIMIT_WARN_THRESHOLD {
+        record_cooldown(LOW_BUCKET_COOLDOWN, "ESI bucket rate-limit budget is low");
         warn!(
             operation,
             rate_limit_group = group.as_deref(),
@@ -277,6 +249,8 @@ enum RateLimitDecision {
 
 #[cfg(test)]
 mod tests {
+    use reqwest::header::HeaderValue;
+
     use super::*;
 
     #[test]

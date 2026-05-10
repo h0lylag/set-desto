@@ -2,7 +2,7 @@ use std::sync::mpsc::{self, TryRecvError};
 
 use tracing::{debug, error, info, warn};
 
-use crate::eve::auth::SsoConfig;
+use crate::eve::sso::SsoConfig;
 
 use super::models::{
     AccessTokenUpdate, WaypointBatchSummary, WaypointSendEvent, WaypointSendJob,

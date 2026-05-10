@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime};
 use tracing::warn;
 
 use crate::domain::destination;
-use crate::eve::auth::SsoConfig;
+use crate::eve::sso::SsoConfig;
 use crate::eve::waypoints::WaypointOptions;
 use crate::storage::config::{CharacterConfig, FavoriteDestinationConfig};
 use crate::storage::tokens::{KeyringTokenStore, TokenStore};
