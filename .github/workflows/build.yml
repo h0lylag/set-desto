@@ -1,0 +1,72 @@
+name: Build
+
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  push:
+    branches: ["main", "dev"]
+  pull_request:
+    branches: ["main", "dev"]
+
+jobs:
+  cargo:
+    name: Cargo (${{ matrix.platform }})
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: install dependencies (ubuntu only)
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libdbus-1-dev \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxcb1-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libxrandr-dev \
+            pkg-config
+
+      - name: cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: check formatting
+        run: cargo fmt --check
+
+      - name: run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: run tests
+        run: cargo test
+
+      - name: build release
+        run: cargo build --release
+
+      - name: upload release binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: set-desto-${{ matrix.platform }}
+          path: |
+            target/release/set-desto
+            target/release/set-desto.exe
