@@ -47,11 +47,19 @@ fn render_mode_selector(ui: &mut egui::Ui, app: &mut SetDestoApp) {
 
 fn render_destination_input(ui: &mut egui::Ui, app: &mut SetDestoApp) {
     ui.label("Destination");
-    ui.add(
+    let response = ui.add(
         egui::TextEdit::singleline(&mut app.destination)
             .hint_text("System, station, or structure")
             .desired_width(f32::INFINITY),
     );
+    if response.changed() {
+        app.clear_resolved_destination();
+    }
+
+    if let Some(resolved_destination) = app.resolved_destination_summary() {
+        ui.add_space(6.0);
+        ui.label(format!("Resolved: {resolved_destination}"));
+    }
 }
 
 fn render_actions(ui: &mut egui::Ui, app: &mut SetDestoApp) {

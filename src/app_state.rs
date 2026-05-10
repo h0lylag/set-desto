@@ -89,6 +89,31 @@ impl CharacterSendResult {
 }
 
 #[derive(Clone, Debug)]
+pub struct ResolvedDestinationDisplay {
+    pub name: String,
+    pub id: i64,
+    pub kind_label: &'static str,
+}
+
+impl ResolvedDestinationDisplay {
+    fn from_resolved(destination: &destination::ResolvedDestination) -> Self {
+        Self {
+            name: destination.name.clone(),
+            id: destination.id,
+            kind_label: destination.kind.label(),
+        }
+    }
+
+    pub fn summary(&self) -> String {
+        if self.name == self.id.to_string() {
+            return format!("{}, {}", self.id, self.kind_label);
+        }
+
+        format!("{} ({}), {}", self.name, self.id, self.kind_label)
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct WaypointBatchSummary {
     pub destination_name: String,
     pub destination_id: i64,
@@ -239,6 +264,7 @@ pub struct SetDestoApp {
     pub mode: DestoMode,
     pub status_message: String,
     pub esi_client_id: String,
+    last_resolved_destination: Option<ResolvedDestinationDisplay>,
     pub pending_remove_character_id: Option<u64>,
     config: AppConfig,
     login_receiver: Option<Receiver<LoginResult>>,
@@ -289,6 +315,7 @@ impl SetDestoApp {
             mode: DestoMode::Manual,
             status_message,
             esi_client_id,
+            last_resolved_destination: None,
             pending_remove_character_id: None,
             config,
             login_receiver: None,
@@ -314,6 +341,16 @@ impl SetDestoApp {
         }
 
         self.last_waypoint_batch.clone()
+    }
+
+    pub fn resolved_destination_summary(&self) -> Option<String> {
+        self.last_resolved_destination
+            .as_ref()
+            .map(ResolvedDestinationDisplay::summary)
+    }
+
+    pub fn clear_resolved_destination(&mut self) {
+        self.last_resolved_destination = None;
     }
 
     pub fn failed_send_count(&self) -> usize {
@@ -524,6 +561,9 @@ impl SetDestoApp {
                 return;
             }
         };
+        self.last_resolved_destination = Some(ResolvedDestinationDisplay::from_resolved(
+            &resolved_destination,
+        ));
         let destination_id = resolved_destination.id;
 
         let selected_characters_with_access_tokens = self
@@ -567,6 +607,7 @@ impl SetDestoApp {
     pub fn clear_destination_form(&mut self) {
         self.destination.clear();
         self.pin_destination = false;
+        self.last_resolved_destination = None;
         self.status_message = "Cleared".to_string();
     }
 
