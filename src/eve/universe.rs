@@ -145,12 +145,13 @@ pub fn resolve_structure_name(
 }
 
 fn lookup_universe_ids(client: &Client, names: &[&str]) -> Result<UniverseIdsResponse> {
-    let response = client
-        .post(format!("{}/universe/ids/", esi::ESI_BASE_URL))
-        .query(&[("datasource", esi::DATASOURCE), ("language", esi::LANGUAGE)])
-        .json(names)
-        .send()
-        .context("Failed to resolve destination name through ESI")?;
+    let response = esi::send_with_rate_limit(
+        client
+            .post(format!("{}/universe/ids/", esi::ESI_BASE_URL))
+            .query(&[("datasource", esi::DATASOURCE), ("language", esi::LANGUAGE)])
+            .json(names),
+        "universe destination name lookup",
+    )?;
 
     let status = response.status();
     if status != StatusCode::OK {
@@ -173,20 +174,21 @@ fn search_character_structures(
     strict: bool,
 ) -> Result<Vec<i64>> {
     let strict = if strict { "true" } else { "false" };
-    let response = client
-        .get(format!(
-            "{}/characters/{character_id}/search/",
-            esi::ESI_BASE_URL
-        ))
-        .bearer_auth(access_token)
-        .query(&[
-            ("datasource", esi::DATASOURCE),
-            ("categories", "structure"),
-            ("search", name),
-            ("strict", strict),
-        ])
-        .send()
-        .context("Failed to search accessible player structures through ESI")?;
+    let response = esi::send_with_rate_limit(
+        client
+            .get(format!(
+                "{}/characters/{character_id}/search/",
+                esi::ESI_BASE_URL
+            ))
+            .bearer_auth(access_token)
+            .query(&[
+                ("datasource", esi::DATASOURCE),
+                ("categories", "structure"),
+                ("search", name),
+                ("strict", strict),
+            ]),
+        "player structure search",
+    )?;
 
     let status = response.status();
     match status {
@@ -215,15 +217,16 @@ fn fetch_structure(
     access_token: &str,
     structure_id: i64,
 ) -> Result<StructureResponse> {
-    let response = client
-        .get(format!(
-            "{}/universe/structures/{structure_id}/",
-            esi::ESI_BASE_URL
-        ))
-        .bearer_auth(access_token)
-        .query(&[("datasource", esi::DATASOURCE)])
-        .send()
-        .with_context(|| format!("Failed to fetch player structure {structure_id} through ESI"))?;
+    let response = esi::send_with_rate_limit(
+        client
+            .get(format!(
+                "{}/universe/structures/{structure_id}/",
+                esi::ESI_BASE_URL
+            ))
+            .bearer_auth(access_token)
+            .query(&[("datasource", esi::DATASOURCE)]),
+        "player structure lookup",
+    )?;
 
     let status = response.status();
     match status {
@@ -309,14 +312,15 @@ fn resolve_system_by_name(client: &Client, name: &str) -> Result<NamedId> {
 }
 
 fn fetch_system(client: &Client, system_id: i64) -> Result<SolarSystemResponse> {
-    let response = client
-        .get(format!(
-            "{}/universe/systems/{system_id}/",
-            esi::ESI_BASE_URL
-        ))
-        .query(&[("datasource", esi::DATASOURCE), ("language", esi::LANGUAGE)])
-        .send()
-        .with_context(|| format!("Failed to fetch solar system {system_id} through ESI"))?;
+    let response = esi::send_with_rate_limit(
+        client
+            .get(format!(
+                "{}/universe/systems/{system_id}/",
+                esi::ESI_BASE_URL
+            ))
+            .query(&[("datasource", esi::DATASOURCE), ("language", esi::LANGUAGE)]),
+        "solar system lookup",
+    )?;
 
     let status = response.status();
     if status != StatusCode::OK {
@@ -332,14 +336,15 @@ fn fetch_system(client: &Client, system_id: i64) -> Result<SolarSystemResponse> 
 }
 
 fn fetch_station(client: &Client, station_id: i64) -> Result<StationResponse> {
-    let response = client
-        .get(format!(
-            "{}/universe/stations/{station_id}/",
-            esi::ESI_BASE_URL
-        ))
-        .query(&[("datasource", esi::DATASOURCE), ("language", esi::LANGUAGE)])
-        .send()
-        .with_context(|| format!("Failed to fetch station {station_id} through ESI"))?;
+    let response = esi::send_with_rate_limit(
+        client
+            .get(format!(
+                "{}/universe/stations/{station_id}/",
+                esi::ESI_BASE_URL
+            ))
+            .query(&[("datasource", esi::DATASOURCE), ("language", esi::LANGUAGE)]),
+        "station lookup",
+    )?;
 
     let status = response.status();
     if status != StatusCode::OK {

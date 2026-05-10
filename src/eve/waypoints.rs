@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use reqwest::StatusCode;
 use tracing::{debug, info};
 
@@ -24,20 +24,21 @@ pub fn set_waypoint(
         "Sending ESI waypoint request"
     );
 
-    let response = client
-        .post(format!("{}/ui/autopilot/waypoint/", esi::ESI_BASE_URL))
-        .bearer_auth(access_token)
-        .query(&[
-            ("datasource", esi::DATASOURCE.to_string()),
-            ("destination_id", destination_id.to_string()),
-            ("add_to_beginning", options.add_to_beginning.to_string()),
-            (
-                "clear_other_waypoints",
-                options.clear_other_waypoints.to_string(),
-            ),
-        ])
-        .send()
-        .context("Failed to send ESI waypoint request")?;
+    let response = esi::send_with_rate_limit(
+        client
+            .post(format!("{}/ui/autopilot/waypoint/", esi::ESI_BASE_URL))
+            .bearer_auth(access_token)
+            .query(&[
+                ("datasource", esi::DATASOURCE.to_string()),
+                ("destination_id", destination_id.to_string()),
+                ("add_to_beginning", options.add_to_beginning.to_string()),
+                (
+                    "clear_other_waypoints",
+                    options.clear_other_waypoints.to_string(),
+                ),
+            ]),
+        "waypoint update",
+    )?;
 
     let status = response.status();
     if status == StatusCode::NO_CONTENT {
