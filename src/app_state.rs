@@ -1,4 +1,5 @@
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::thread;
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -43,6 +44,128 @@ impl AppTab {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum CharacterSendResult {
+    Pending {
+        destination_name: String,
+        destination_id: i64,
+    },
+    Sent {
+        destination_name: String,
+        destination_id: i64,
+    },
+    Failed {
+        destination_name: String,
+        destination_id: i64,
+        error: String,
+    },
+    Skipped {
+        reason: String,
+    },
+}
+
+impl CharacterSendResult {
+    pub fn summary(&self) -> String {
+        match self {
+            Self::Pending {
+                destination_name,
+                destination_id,
+            } => format!("Pending: {destination_name} ({destination_id})"),
+            Self::Sent {
+                destination_name,
+                destination_id,
+            } => format!("Sent: {destination_name} ({destination_id})"),
+            Self::Failed {
+                destination_name,
+                destination_id,
+                error,
+            } => format!("Failed: {destination_name} ({destination_id}) - {error}"),
+            Self::Skipped { reason } => format!("Skipped: {reason}"),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct WaypointSendProgress {
+    destination_name: String,
+    destination_id: i64,
+    total: usize,
+    completed: usize,
+    successes: usize,
+    failures: usize,
+    latest_error: Option<String>,
+}
+
+impl WaypointSendProgress {
+    fn status_message(&self) -> String {
+        if let Some(error) = &self.latest_error {
+            return format!(
+                "Processed {}/{} for {} ({} sent, {} failed); latest error: {error}",
+                self.completed, self.total, self.destination_name, self.successes, self.failures
+            );
+        }
+
+        format!(
+            "Sending {} ({}) to {}/{} characters...",
+            self.destination_name, self.destination_id, self.completed, self.total
+        )
+    }
+
+    fn final_status_message(&self) -> String {
+        if let Some(error) = &self.latest_error {
+            return format!(
+                "Set destination for {}/{} characters ({} failed); latest error: {error}",
+                self.successes, self.total, self.failures
+            );
+        }
+
+        format!(
+            "Set {} ({}) for {} characters",
+            self.destination_name, self.destination_id, self.successes
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+struct WaypointSendJob {
+    character_id: u64,
+    character_name: String,
+    access_token: Option<String>,
+    expires_at: Option<SystemTime>,
+    destination_name: String,
+    destination_id: i64,
+    options: WaypointOptions,
+    token_store: KeyringTokenStore,
+}
+
+#[derive(Debug)]
+enum WaypointSendEvent {
+    Started {
+        character_id: u64,
+        character_name: String,
+    },
+    Finished {
+        character_id: u64,
+        character_name: String,
+        destination_name: String,
+        destination_id: i64,
+        result: std::result::Result<WaypointSendSuccess, String>,
+    },
+    BatchFinished,
+}
+
+#[derive(Debug)]
+struct WaypointSendSuccess {
+    access_token_update: Option<AccessTokenUpdate>,
+}
+
+#[derive(Debug)]
+struct AccessTokenUpdate {
+    access_token: String,
+    expires_at: SystemTime,
+    scopes: Vec<String>,
+}
+
 pub struct SetDestoApp {
     pub debug_mode: bool,
     pub active_tab: AppTab,
@@ -54,6 +177,8 @@ pub struct SetDestoApp {
     pub pending_remove_character_id: Option<u64>,
     config: AppConfig,
     login_receiver: Option<Receiver<LoginResult>>,
+    waypoint_send_receiver: Option<Receiver<WaypointSendEvent>>,
+    waypoint_send_progress: Option<WaypointSendProgress>,
     token_store: KeyringTokenStore,
 }
 
@@ -98,12 +223,18 @@ impl SetDestoApp {
             pending_remove_character_id: None,
             config,
             login_receiver: None,
+            waypoint_send_receiver: None,
+            waypoint_send_progress: None,
             token_store,
         }
     }
 
     pub fn login_in_progress(&self) -> bool {
         self.login_receiver.is_some()
+    }
+
+    pub fn waypoint_send_in_progress(&self) -> bool {
+        self.waypoint_send_receiver.is_some()
     }
 
     pub fn start_character_login(&mut self) {
@@ -160,7 +291,35 @@ impl SetDestoApp {
         }
     }
 
+    pub fn poll_waypoint_send(&mut self) {
+        loop {
+            let event = match self
+                .waypoint_send_receiver
+                .as_ref()
+                .map(|receiver| receiver.try_recv())
+            {
+                Some(Ok(event)) => event,
+                Some(Err(TryRecvError::Empty)) | None => return,
+                Some(Err(TryRecvError::Disconnected)) => {
+                    error!("Waypoint send worker disconnected");
+                    self.status_message = "Waypoint send failed: worker stopped".to_string();
+                    self.waypoint_send_receiver = None;
+                    self.waypoint_send_progress = None;
+                    return;
+                }
+            };
+
+            self.handle_waypoint_send_event(event);
+        }
+    }
+
     pub fn set_destination(&mut self) {
+        if self.waypoint_send_in_progress() {
+            debug!("Ignoring Set Destination because a waypoint send is already in progress");
+            self.status_message = "Waypoint send already in progress".to_string();
+            return;
+        }
+
         let destination = self.destination.trim().to_owned();
 
         if destination.is_empty() {
@@ -214,60 +373,181 @@ impl SetDestoApp {
             add_to_beginning: self.pin_destination,
             clear_other_waypoints: !self.pin_destination,
         };
-        let mut successes = 0_usize;
-        let mut failures = Vec::new();
+        self.prepare_send_results(&resolved_destination.name, destination_id);
 
-        for index in 0..self.characters.len() {
-            if !self.characters[index].selected {
-                continue;
-            }
+        let jobs = self.waypoint_send_jobs(&resolved_destination.name, destination_id, options);
+        let total = jobs.len();
+        let (sender, receiver) = mpsc::channel();
+        start_waypoint_send(jobs, sender);
 
-            let character_id = self.characters[index].character_id;
-            let character_name = self.characters[index].character_name.clone();
-            let result = self
-                .access_token_for_character(index)
-                .and_then(|access_token| {
-                    waypoints::set_waypoint(&access_token, destination_id, options)
-                });
-
-            match result {
-                Ok(()) => {
-                    successes += 1;
-                    info!(
-                        character_id,
-                        character_name, destination_id, "Set waypoint for character"
-                    );
-                }
-                Err(err) => {
-                    error!(
-                        character_id,
-                        character_name,
-                        destination_id,
-                        error = ?err,
-                        "Failed to set waypoint for character"
-                    );
-                    failures.push(format!("{character_name}: {err}"));
-                }
-            }
-        }
-
-        if failures.is_empty() {
-            self.status_message = format!(
-                "Set {} ({destination_id}) for {successes} characters",
-                resolved_destination.name
-            );
-        } else {
-            self.status_message = format!(
-                "Set destination for {successes}/{} characters; first error: {}",
-                selected_character_count, failures[0]
-            );
-        }
+        self.waypoint_send_receiver = Some(receiver);
+        self.waypoint_send_progress = Some(WaypointSendProgress {
+            destination_name: resolved_destination.name.clone(),
+            destination_id,
+            total,
+            completed: 0,
+            successes: 0,
+            failures: 0,
+            latest_error: None,
+        });
+        self.status_message = format!(
+            "Sending {} ({destination_id}) to {total} characters...",
+            resolved_destination.name
+        );
     }
 
     pub fn clear_destination_form(&mut self) {
         self.destination.clear();
         self.pin_destination = false;
         self.status_message = "Cleared".to_string();
+    }
+
+    fn prepare_send_results(&mut self, destination_name: &str, destination_id: i64) {
+        for character in &mut self.characters {
+            character.last_send_result = Some(if character.selected {
+                CharacterSendResult::Pending {
+                    destination_name: destination_name.to_string(),
+                    destination_id,
+                }
+            } else {
+                CharacterSendResult::Skipped {
+                    reason: "not selected".to_string(),
+                }
+            });
+        }
+    }
+
+    fn waypoint_send_jobs(
+        &self,
+        destination_name: &str,
+        destination_id: i64,
+        options: WaypointOptions,
+    ) -> Vec<WaypointSendJob> {
+        self.characters
+            .iter()
+            .filter(|character| character.selected)
+            .map(|character| WaypointSendJob {
+                character_id: character.character_id,
+                character_name: character.character_name.clone(),
+                access_token: character.access_token.clone(),
+                expires_at: character.expires_at,
+                destination_name: destination_name.to_string(),
+                destination_id,
+                options,
+                token_store: self.token_store,
+            })
+            .collect()
+    }
+
+    fn handle_waypoint_send_event(&mut self, event: WaypointSendEvent) {
+        match event {
+            WaypointSendEvent::Started {
+                character_id,
+                character_name,
+            } => {
+                debug!(character_id, character_name, "Waypoint send started");
+                self.status_message = format!("Sending waypoint for {character_name}...");
+            }
+            WaypointSendEvent::Finished {
+                character_id,
+                character_name,
+                destination_name,
+                destination_id,
+                result,
+            } => {
+                self.record_waypoint_send_result(
+                    character_id,
+                    character_name,
+                    destination_name,
+                    destination_id,
+                    result,
+                );
+            }
+            WaypointSendEvent::BatchFinished => {
+                self.finish_waypoint_send();
+            }
+        }
+    }
+
+    fn record_waypoint_send_result(
+        &mut self,
+        character_id: u64,
+        character_name: String,
+        destination_name: String,
+        destination_id: i64,
+        result: std::result::Result<WaypointSendSuccess, String>,
+    ) {
+        let status_message = {
+            let Some(progress) = &mut self.waypoint_send_progress else {
+                return;
+            };
+            progress.completed += 1;
+
+            match &result {
+                Ok(_) => {
+                    progress.successes += 1;
+                }
+                Err(error) => {
+                    progress.failures += 1;
+                    progress.latest_error = Some(format!("{character_name}: {error}"));
+                }
+            }
+
+            progress.status_message()
+        };
+
+        match result {
+            Ok(success) => {
+                if let Some(update) = success.access_token_update {
+                    self.apply_access_token_update(character_id, update);
+                }
+                if let Some(character) = self.character_mut(character_id) {
+                    character.last_send_result = Some(CharacterSendResult::Sent {
+                        destination_name: destination_name.clone(),
+                        destination_id,
+                    });
+                }
+                info!(
+                    character_id,
+                    character_name, destination_id, "Set waypoint for character"
+                );
+            }
+            Err(error) => {
+                if let Some(character) = self.character_mut(character_id) {
+                    character.last_send_result = Some(CharacterSendResult::Failed {
+                        destination_name: destination_name.clone(),
+                        destination_id,
+                        error: error.clone(),
+                    });
+                }
+                error!(
+                    character_id,
+                    character_name, destination_id, error, "Failed to set waypoint for character"
+                );
+            }
+        }
+
+        self.status_message = status_message;
+    }
+
+    fn finish_waypoint_send(&mut self) {
+        if let Some(progress) = &self.waypoint_send_progress {
+            self.status_message = progress.final_status_message();
+        }
+        self.waypoint_send_receiver = None;
+        self.waypoint_send_progress = None;
+    }
+
+    fn apply_access_token_update(&mut self, character_id: u64, update: AccessTokenUpdate) {
+        if let Some(character) = self.character_mut(character_id) {
+            character.update_access_token(update.access_token, update.expires_at, update.scopes);
+        }
+    }
+
+    fn character_mut(&mut self, character_id: u64) -> Option<&mut CharacterState> {
+        self.characters
+            .iter_mut()
+            .find(|character| character.character_id == character_id)
     }
 
     pub fn selected_character_count(&self) -> usize {
@@ -326,6 +606,12 @@ impl SetDestoApp {
     }
 
     pub fn request_remove_character(&mut self, character_id: u64) {
+        if self.waypoint_send_in_progress() {
+            debug!("Ignoring Remove Character because a waypoint send is in progress");
+            self.status_message = "Wait for the current waypoint send to finish".to_string();
+            return;
+        }
+
         let Some(character) = self
             .characters
             .iter()
@@ -452,61 +738,6 @@ impl SetDestoApp {
             self.status_message = format!("Failed to save character selection: {err}");
         }
     }
-
-    fn access_token_for_character(&mut self, index: usize) -> Result<String> {
-        let character = self
-            .characters
-            .get(index)
-            .ok_or_else(|| anyhow!("Character index {index} was out of range"))?;
-
-        if character.access_token_is_fresh() {
-            debug!(
-                character_id = character.character_id,
-                character_name = %character.character_name,
-                "Using cached EVE SSO access token"
-            );
-            return character
-                .access_token
-                .clone()
-                .ok_or_else(|| anyhow!("Character access token was unexpectedly missing"));
-        }
-
-        let character_id = character.character_id;
-        let character_name = character.character_name.clone();
-        info!(
-            character_id,
-            character_name, "Refreshing access token before ESI request"
-        );
-
-        let refresh_token = self.token_store.load_refresh_token(character_id)?;
-        let config = SsoConfig::from_env()?;
-        let refreshed = auth::refresh_access_token(&config, &refresh_token)?;
-
-        if refreshed.character_id != character_id {
-            bail!(
-                "Refreshed token character mismatch: expected {character_id}, got {}",
-                refreshed.character_id
-            );
-        }
-
-        if let Some(refresh_token) = &refreshed.refresh_token {
-            self.token_store
-                .save_refresh_token(character_id, refresh_token)?;
-        }
-
-        let expires_at = expires_at_from_now(refreshed.expires_in);
-        self.token_store
-            .save_access_token(character_id, &refreshed.access_token, expires_at)?;
-
-        let access_token = refreshed.access_token.clone();
-        self.characters[index].update_access_token(
-            refreshed.access_token,
-            expires_at,
-            refreshed.scopes,
-        );
-
-        Ok(access_token)
-    }
 }
 
 #[derive(Debug)]
@@ -515,6 +746,7 @@ pub struct CharacterState {
     pub character_name: String,
     pub scopes: Vec<String>,
     pub selected: bool,
+    pub last_send_result: Option<CharacterSendResult>,
     access_token: Option<String>,
     expires_at: Option<SystemTime>,
     refresh_token_saved: bool,
@@ -542,6 +774,7 @@ impl CharacterState {
             character_name: character.character_name,
             scopes: character.scopes,
             selected: character.selected,
+            last_send_result: None,
             access_token,
             expires_at,
             refresh_token_saved: true,
@@ -558,6 +791,7 @@ impl CharacterState {
             character_name: character.character_name,
             scopes: character.scopes,
             selected: character.selected,
+            last_send_result: None,
             access_token: Some(access_token),
             expires_at: Some(expires_at),
             refresh_token_saved: true,
@@ -566,13 +800,6 @@ impl CharacterState {
 
     pub fn has_access_token(&self) -> bool {
         self.access_token.is_some()
-    }
-
-    fn access_token_is_fresh(&self) -> bool {
-        self.access_token.is_some()
-            && self.expires_at.is_some_and(|expires_at| {
-                expires_at > SystemTime::now() + ACCESS_TOKEN_REFRESH_BUFFER
-            })
     }
 
     fn update_access_token(
@@ -613,6 +840,105 @@ impl CharacterState {
 
 fn expires_at_from_now(expires_in: u64) -> SystemTime {
     SystemTime::now() + Duration::from_secs(expires_in)
+}
+
+fn start_waypoint_send(jobs: Vec<WaypointSendJob>, sender: Sender<WaypointSendEvent>) {
+    thread::spawn(move || {
+        let mut handles = Vec::with_capacity(jobs.len());
+
+        for job in jobs {
+            let sender = sender.clone();
+            handles.push(thread::spawn(move || {
+                let _ = sender.send(WaypointSendEvent::Started {
+                    character_id: job.character_id,
+                    character_name: job.character_name.clone(),
+                });
+
+                let result = run_waypoint_send_job(&job).map_err(|err| err.to_string());
+                let _ = sender.send(WaypointSendEvent::Finished {
+                    character_id: job.character_id,
+                    character_name: job.character_name,
+                    destination_name: job.destination_name,
+                    destination_id: job.destination_id,
+                    result,
+                });
+            }));
+        }
+
+        for handle in handles {
+            if handle.join().is_err() {
+                error!("Waypoint send worker panicked");
+            }
+        }
+
+        let _ = sender.send(WaypointSendEvent::BatchFinished);
+    });
+}
+
+fn run_waypoint_send_job(job: &WaypointSendJob) -> Result<WaypointSendSuccess> {
+    let (access_token, access_token_update) = access_token_for_job(job)?;
+    waypoints::set_waypoint(&access_token, job.destination_id, job.options)?;
+
+    Ok(WaypointSendSuccess {
+        access_token_update,
+    })
+}
+
+fn access_token_for_job(job: &WaypointSendJob) -> Result<(String, Option<AccessTokenUpdate>)> {
+    if access_token_is_fresh(&job.access_token, job.expires_at) {
+        debug!(
+            character_id = job.character_id,
+            character_name = %job.character_name,
+            "Using cached EVE SSO access token"
+        );
+        let access_token = job
+            .access_token
+            .clone()
+            .ok_or_else(|| anyhow!("Character access token was unexpectedly missing"))?;
+        return Ok((access_token, None));
+    }
+
+    info!(
+        character_id = job.character_id,
+        character_name = %job.character_name,
+        "Refreshing access token before ESI request"
+    );
+
+    let refresh_token = job.token_store.load_refresh_token(job.character_id)?;
+    let config = SsoConfig::from_env()?;
+    let refreshed = auth::refresh_access_token(&config, &refresh_token)?;
+
+    if refreshed.character_id != job.character_id {
+        bail!(
+            "Refreshed token character mismatch: expected {}, got {}",
+            job.character_id,
+            refreshed.character_id
+        );
+    }
+
+    if let Some(refresh_token) = &refreshed.refresh_token {
+        job.token_store
+            .save_refresh_token(job.character_id, refresh_token)?;
+    }
+
+    let expires_at = expires_at_from_now(refreshed.expires_in);
+    job.token_store
+        .save_access_token(job.character_id, &refreshed.access_token, expires_at)?;
+
+    let access_token = refreshed.access_token.clone();
+    let update = AccessTokenUpdate {
+        access_token: refreshed.access_token,
+        expires_at,
+        scopes: refreshed.scopes,
+    };
+
+    Ok((access_token, Some(update)))
+}
+
+fn access_token_is_fresh(access_token: &Option<String>, expires_at: Option<SystemTime>) -> bool {
+    access_token.is_some()
+        && expires_at
+            .is_some_and(|expires_at| expires_at > SystemTime::now() + ACCESS_TOKEN_REFRESH_BUFFER)
 }
 
 fn upsert_character(characters: &mut Vec<CharacterState>, character: CharacterState) {

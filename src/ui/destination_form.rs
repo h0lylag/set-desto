@@ -56,11 +56,20 @@ fn render_actions(ui: &mut egui::Ui, app: &mut SetDestoApp) {
     let selected_character_count = app.selected_character_count();
     let can_set_destination = !app.destination.trim().is_empty()
         && selected_character_count > 0
-        && !app.characters.is_empty();
+        && !app.characters.is_empty()
+        && !app.waypoint_send_in_progress();
+    let set_destination_label = if app.waypoint_send_in_progress() {
+        "Sending..."
+    } else {
+        "Set Destination"
+    };
 
     ui.horizontal(|ui| {
         if ui
-            .add_enabled(can_set_destination, egui::Button::new("Set Destination"))
+            .add_enabled(
+                can_set_destination,
+                egui::Button::new(set_destination_label),
+            )
             .clicked()
         {
             app.set_destination();

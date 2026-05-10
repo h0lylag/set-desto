@@ -61,7 +61,14 @@ fn render_selection_toolbar(ui: &mut egui::Ui, app: &mut SetDestoApp) {
 }
 
 fn render_character_row(ui: &mut egui::Ui, app: &mut SetDestoApp, character_id: u64) {
-    let (character_id, character_name, token_summary, mut selected, remove_pending) = {
+    let (
+        character_id,
+        character_name,
+        token_summary,
+        send_result_summary,
+        mut selected,
+        remove_pending,
+    ) = {
         let Some(character) = app
             .characters
             .iter()
@@ -73,6 +80,10 @@ fn render_character_row(ui: &mut egui::Ui, app: &mut SetDestoApp, character_id: 
             character.character_id,
             character.character_name.clone(),
             character.token_summary(),
+            character
+                .last_send_result
+                .as_ref()
+                .map(|result| result.summary()),
             character.selected,
             app.pending_remove_character_id == Some(character.character_id),
         )
@@ -81,6 +92,7 @@ fn render_character_row(ui: &mut egui::Ui, app: &mut SetDestoApp, character_id: 
     let mut remove_clicked = false;
     let mut confirm_clicked = false;
     let mut cancel_clicked = false;
+    let send_in_progress = app.waypoint_send_in_progress();
 
     ui.horizontal(|ui| {
         selection_changed = ui.checkbox(&mut selected, "").changed();
@@ -89,10 +101,14 @@ fn render_character_row(ui: &mut egui::Ui, app: &mut SetDestoApp, character_id: 
 
         if remove_pending {
             ui.label("Remove?");
-            confirm_clicked = ui.button("Confirm").clicked();
+            confirm_clicked = ui
+                .add_enabled(!send_in_progress, egui::Button::new("Confirm"))
+                .clicked();
             cancel_clicked = ui.button("Cancel").clicked();
         } else {
-            remove_clicked = ui.button("Remove").clicked();
+            remove_clicked = ui
+                .add_enabled(!send_in_progress, egui::Button::new("Remove"))
+                .clicked();
         }
     });
 
@@ -100,6 +116,13 @@ fn render_character_row(ui: &mut egui::Ui, app: &mut SetDestoApp, character_id: 
         ui.add_space(24.0);
         ui.label(token_summary);
     });
+
+    if let Some(send_result_summary) = send_result_summary {
+        ui.horizontal(|ui| {
+            ui.add_space(24.0);
+            ui.label(send_result_summary);
+        });
+    }
 
     if selection_changed {
         app.set_character_selected(character_id, selected);
