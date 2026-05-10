@@ -6,8 +6,10 @@ pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
     ui.horizontal(|ui| {
         ui.heading("Character Management");
 
-        let add_button =
-            ui.add_enabled(!app.login_in_progress(), egui::Button::new("Add Character"));
+        let add_button = ui.add_enabled(
+            !app.login_in_progress() && !app.waypoint_send_in_progress(),
+            egui::Button::new("Add Character"),
+        );
         if add_button.clicked() {
             app.start_character_login();
         }
@@ -39,6 +41,8 @@ pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
 }
 
 fn render_selection_toolbar(ui: &mut egui::Ui, app: &mut SetDestoApp) {
+    let send_in_progress = app.waypoint_send_in_progress();
+
     ui.horizontal(|ui| {
         ui.label(format!(
             "{}/{} selected",
@@ -46,15 +50,24 @@ fn render_selection_toolbar(ui: &mut egui::Ui, app: &mut SetDestoApp) {
             app.characters.len()
         ));
 
-        if ui.button("All").clicked() {
+        if ui
+            .add_enabled(!send_in_progress, egui::Button::new("All"))
+            .clicked()
+        {
             app.set_all_characters_selected(true);
         }
 
-        if ui.button("None").clicked() {
+        if ui
+            .add_enabled(!send_in_progress, egui::Button::new("None"))
+            .clicked()
+        {
             app.set_all_characters_selected(false);
         }
 
-        if ui.button("Invert").clicked() {
+        if ui
+            .add_enabled(!send_in_progress, egui::Button::new("Invert"))
+            .clicked()
+        {
             app.invert_character_selection();
         }
     });
@@ -95,7 +108,9 @@ fn render_character_row(ui: &mut egui::Ui, app: &mut SetDestoApp, character_id: 
     let send_in_progress = app.waypoint_send_in_progress();
 
     ui.horizontal(|ui| {
-        selection_changed = ui.checkbox(&mut selected, "").changed();
+        selection_changed = ui
+            .add_enabled(!send_in_progress, egui::Checkbox::new(&mut selected, ""))
+            .changed();
         ui.strong(&character_name);
         ui.label(format!("ID {character_id}"));
 

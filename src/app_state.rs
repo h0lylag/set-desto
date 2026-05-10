@@ -6,6 +6,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use eframe::egui;
 use tracing::{debug, error, info, warn};
 
+use crate::app_constants::MAX_CONCURRENT_WAYPOINT_SENDS;
 use crate::domain::destination;
 use crate::eve::auth::{self, AuthenticatedCharacter, LoginResult, SsoConfig};
 use crate::eve::waypoints::{self, WaypointOptions};
@@ -85,6 +86,59 @@ impl CharacterSendResult {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct WaypointBatchSummary {
+    pub destination_name: String,
+    pub destination_id: i64,
+    pub total: usize,
+    pub completed: usize,
+    pub successes: usize,
+    pub failures: usize,
+    pub skipped: usize,
+    pub in_progress: bool,
+    pub latest_error: Option<String>,
+}
+
+impl WaypointBatchSummary {
+    pub fn summary_line(&self) -> String {
+        let destination = format!("{} ({})", self.destination_name, self.destination_id);
+
+        if self.in_progress {
+            return format!(
+                "{destination} -> {}/{} complete, {} sent, {} failed, {} skipped",
+                self.completed, self.total, self.successes, self.failures, self.skipped
+            );
+        }
+
+        format!(
+            "{destination} -> {} sent, {} failed, {} skipped",
+            self.successes, self.failures, self.skipped
+        )
+    }
+
+    pub fn progress_fraction(&self) -> f32 {
+        if self.total == 0 {
+            return 1.0;
+        }
+
+        self.completed as f32 / self.total as f32
+    }
+
+    pub fn progress_text(&self) -> String {
+        format!("{}/{}", self.completed, self.total)
+    }
+
+    fn status_message(&self) -> String {
+        let mut status = self.summary_line();
+
+        if let Some(error) = &self.latest_error {
+            status.push_str(&format!("; latest error: {error}"));
+        }
+
+        status
+    }
+}
+
 #[derive(Debug)]
 struct WaypointSendProgress {
     destination_name: String,
@@ -93,37 +147,44 @@ struct WaypointSendProgress {
     completed: usize,
     successes: usize,
     failures: usize,
+    skipped: usize,
     latest_error: Option<String>,
 }
 
 impl WaypointSendProgress {
+    fn summary(&self, in_progress: bool) -> WaypointBatchSummary {
+        WaypointBatchSummary {
+            destination_name: self.destination_name.clone(),
+            destination_id: self.destination_id,
+            total: self.total,
+            completed: self.completed,
+            successes: self.successes,
+            failures: self.failures,
+            skipped: self.skipped,
+            in_progress,
+            latest_error: self.latest_error.clone(),
+        }
+    }
+
     fn status_message(&self) -> String {
+        let mut status = format!(
+            "Sending {}: {}/{} complete, {} sent, {} failed",
+            self.destination_name, self.completed, self.total, self.successes, self.failures
+        );
+
         if let Some(error) = &self.latest_error {
-            return format!(
-                "Processed {}/{} for {} ({} sent, {} failed); latest error: {error}",
-                self.completed, self.total, self.destination_name, self.successes, self.failures
-            );
+            status.push_str(&format!("; latest error: {error}"));
         }
 
-        format!(
-            "Sending {} ({}) to {}/{} characters...",
-            self.destination_name, self.destination_id, self.completed, self.total
-        )
+        status
     }
+}
 
-    fn final_status_message(&self) -> String {
-        if let Some(error) = &self.latest_error {
-            return format!(
-                "Set destination for {}/{} characters ({} failed); latest error: {error}",
-                self.successes, self.total, self.failures
-            );
-        }
-
-        format!(
-            "Set {} ({}) for {} characters",
-            self.destination_name, self.destination_id, self.successes
-        )
-    }
+#[derive(Clone, Debug)]
+struct WaypointSendRequest {
+    destination_name: String,
+    destination_id: i64,
+    options: WaypointOptions,
 }
 
 #[derive(Clone, Debug)]
@@ -179,6 +240,8 @@ pub struct SetDestoApp {
     login_receiver: Option<Receiver<LoginResult>>,
     waypoint_send_receiver: Option<Receiver<WaypointSendEvent>>,
     waypoint_send_progress: Option<WaypointSendProgress>,
+    last_waypoint_batch: Option<WaypointBatchSummary>,
+    last_waypoint_request: Option<WaypointSendRequest>,
     token_store: KeyringTokenStore,
 }
 
@@ -225,6 +288,8 @@ impl SetDestoApp {
             login_receiver: None,
             waypoint_send_receiver: None,
             waypoint_send_progress: None,
+            last_waypoint_batch: None,
+            last_waypoint_request: None,
             token_store,
         }
     }
@@ -237,9 +302,75 @@ impl SetDestoApp {
         self.waypoint_send_receiver.is_some()
     }
 
+    pub fn waypoint_batch_summary(&self) -> Option<WaypointBatchSummary> {
+        if let Some(progress) = &self.waypoint_send_progress {
+            return Some(progress.summary(true));
+        }
+
+        self.last_waypoint_batch.clone()
+    }
+
+    pub fn failed_send_count(&self) -> usize {
+        self.characters
+            .iter()
+            .filter(|character| has_failed_send_result(character))
+            .count()
+    }
+
+    pub fn can_retry_failed_waypoints(&self) -> bool {
+        !self.waypoint_send_in_progress()
+            && self.last_waypoint_request.is_some()
+            && self.failed_send_count() > 0
+    }
+
+    pub fn retry_failed_waypoints(&mut self) {
+        if self.waypoint_send_in_progress() {
+            debug!("Ignoring Retry Failed because a waypoint send is already in progress");
+            self.status_message = "Waypoint send already in progress".to_string();
+            return;
+        }
+
+        let Some(request) = self.last_waypoint_request.clone() else {
+            self.status_message = "No failed waypoint batch to retry".to_string();
+            return;
+        };
+
+        let target_ids: Vec<u64> = self
+            .characters
+            .iter()
+            .filter(|character| {
+                matches!(
+                    character.last_send_result.as_ref(),
+                    Some(CharacterSendResult::Failed { destination_id, .. })
+                        if *destination_id == request.destination_id
+                )
+            })
+            .map(|character| character.character_id)
+            .collect();
+
+        if target_ids.is_empty() {
+            self.status_message = "No failed waypoint sends to retry".to_string();
+            return;
+        }
+
+        info!(
+            destination_id = request.destination_id,
+            destination_name = %request.destination_name,
+            retry_count = target_ids.len(),
+            "Retrying failed waypoint sends"
+        );
+        self.start_waypoint_send_batch(request, target_ids, 0, false);
+    }
+
     pub fn start_character_login(&mut self) {
         if self.login_in_progress() {
             debug!("Ignoring Add Character click because login is already in progress");
+            return;
+        }
+
+        if self.waypoint_send_in_progress() {
+            debug!("Ignoring Add Character click because a waypoint send is in progress");
+            self.status_message = "Wait for the current waypoint send to finish".to_string();
             return;
         }
 
@@ -373,27 +504,20 @@ impl SetDestoApp {
             add_to_beginning: self.pin_destination,
             clear_other_waypoints: !self.pin_destination,
         };
-        self.prepare_send_results(&resolved_destination.name, destination_id);
-
-        let jobs = self.waypoint_send_jobs(&resolved_destination.name, destination_id, options);
-        let total = jobs.len();
-        let (sender, receiver) = mpsc::channel();
-        start_waypoint_send(jobs, sender);
-
-        self.waypoint_send_receiver = Some(receiver);
-        self.waypoint_send_progress = Some(WaypointSendProgress {
+        let request = WaypointSendRequest {
             destination_name: resolved_destination.name.clone(),
             destination_id,
-            total,
-            completed: 0,
-            successes: 0,
-            failures: 0,
-            latest_error: None,
-        });
-        self.status_message = format!(
-            "Sending {} ({destination_id}) to {total} characters...",
-            resolved_destination.name
-        );
+            options,
+        };
+        let target_ids: Vec<u64> = self
+            .characters
+            .iter()
+            .filter(|character| character.selected)
+            .map(|character| character.character_id)
+            .collect();
+        let skipped = self.characters.len().saturating_sub(target_ids.len());
+
+        self.start_waypoint_send_batch(request, target_ids, skipped, true);
     }
 
     pub fn clear_destination_form(&mut self) {
@@ -402,38 +526,75 @@ impl SetDestoApp {
         self.status_message = "Cleared".to_string();
     }
 
-    fn prepare_send_results(&mut self, destination_name: &str, destination_id: i64) {
+    fn start_waypoint_send_batch(
+        &mut self,
+        request: WaypointSendRequest,
+        target_ids: Vec<u64>,
+        skipped: usize,
+        mark_non_targets_skipped: bool,
+    ) {
+        self.prepare_send_results(&request, &target_ids, mark_non_targets_skipped);
+
+        let jobs = self.waypoint_send_jobs(&request, &target_ids);
+        let total = jobs.len();
+        let (sender, receiver) = mpsc::channel();
+        start_waypoint_send(jobs, sender);
+
+        self.waypoint_send_receiver = Some(receiver);
+        self.waypoint_send_progress = Some(WaypointSendProgress {
+            destination_name: request.destination_name.clone(),
+            destination_id: request.destination_id,
+            total,
+            completed: 0,
+            successes: 0,
+            failures: 0,
+            skipped,
+            latest_error: None,
+        });
+        self.last_waypoint_batch = None;
+        self.last_waypoint_request = Some(request.clone());
+        self.status_message = format!(
+            "Sending {} ({}) to {total} characters...",
+            request.destination_name, request.destination_id
+        );
+    }
+
+    fn prepare_send_results(
+        &mut self,
+        request: &WaypointSendRequest,
+        target_ids: &[u64],
+        mark_non_targets_skipped: bool,
+    ) {
         for character in &mut self.characters {
-            character.last_send_result = Some(if character.selected {
-                CharacterSendResult::Pending {
-                    destination_name: destination_name.to_string(),
-                    destination_id,
-                }
-            } else {
-                CharacterSendResult::Skipped {
+            if target_ids.contains(&character.character_id) {
+                character.last_send_result = Some(CharacterSendResult::Pending {
+                    destination_name: request.destination_name.clone(),
+                    destination_id: request.destination_id,
+                });
+            } else if mark_non_targets_skipped {
+                character.last_send_result = Some(CharacterSendResult::Skipped {
                     reason: "not selected".to_string(),
-                }
-            });
+                });
+            }
         }
     }
 
     fn waypoint_send_jobs(
         &self,
-        destination_name: &str,
-        destination_id: i64,
-        options: WaypointOptions,
+        request: &WaypointSendRequest,
+        target_ids: &[u64],
     ) -> Vec<WaypointSendJob> {
         self.characters
             .iter()
-            .filter(|character| character.selected)
+            .filter(|character| target_ids.contains(&character.character_id))
             .map(|character| WaypointSendJob {
                 character_id: character.character_id,
                 character_name: character.character_name.clone(),
                 access_token: character.access_token.clone(),
                 expires_at: character.expires_at,
-                destination_name: destination_name.to_string(),
-                destination_id,
-                options,
+                destination_name: request.destination_name.clone(),
+                destination_id: request.destination_id,
+                options: request.options,
                 token_store: self.token_store,
             })
             .collect()
@@ -532,7 +693,15 @@ impl SetDestoApp {
 
     fn finish_waypoint_send(&mut self) {
         if let Some(progress) = &self.waypoint_send_progress {
-            self.status_message = progress.final_status_message();
+            let mut summary = self
+                .last_waypoint_request
+                .as_ref()
+                .map(|request| self.summarize_send_results(request, false))
+                .unwrap_or_else(|| progress.summary(false));
+            summary.latest_error = progress.latest_error.clone();
+
+            self.status_message = summary.status_message();
+            self.last_waypoint_batch = Some(summary);
         }
         self.waypoint_send_receiver = None;
         self.waypoint_send_progress = None;
@@ -550,6 +719,54 @@ impl SetDestoApp {
             .find(|character| character.character_id == character_id)
     }
 
+    fn summarize_send_results(
+        &self,
+        request: &WaypointSendRequest,
+        in_progress: bool,
+    ) -> WaypointBatchSummary {
+        let mut summary = WaypointBatchSummary {
+            destination_name: request.destination_name.clone(),
+            destination_id: request.destination_id,
+            total: 0,
+            completed: 0,
+            successes: 0,
+            failures: 0,
+            skipped: 0,
+            in_progress,
+            latest_error: None,
+        };
+
+        for character in &self.characters {
+            match character.last_send_result.as_ref() {
+                Some(CharacterSendResult::Pending { destination_id, .. })
+                    if *destination_id == request.destination_id =>
+                {
+                    summary.total += 1;
+                }
+                Some(CharacterSendResult::Sent { destination_id, .. })
+                    if *destination_id == request.destination_id =>
+                {
+                    summary.total += 1;
+                    summary.completed += 1;
+                    summary.successes += 1;
+                }
+                Some(CharacterSendResult::Failed { destination_id, .. })
+                    if *destination_id == request.destination_id =>
+                {
+                    summary.total += 1;
+                    summary.completed += 1;
+                    summary.failures += 1;
+                }
+                Some(CharacterSendResult::Skipped { .. }) => {
+                    summary.skipped += 1;
+                }
+                _ => {}
+            }
+        }
+
+        summary
+    }
+
     pub fn selected_character_count(&self) -> usize {
         self.characters
             .iter()
@@ -558,6 +775,12 @@ impl SetDestoApp {
     }
 
     pub fn set_character_selected(&mut self, character_id: u64, selected: bool) {
+        if self.waypoint_send_in_progress() {
+            debug!("Ignoring character selection because a waypoint send is in progress");
+            self.status_message = "Wait for the current waypoint send to finish".to_string();
+            return;
+        }
+
         let Some(character) = self
             .characters
             .iter_mut()
@@ -572,9 +795,11 @@ impl SetDestoApp {
         }
 
         character.selected = selected;
+        let character_name = character.character_name.clone();
+        self.clear_send_results();
         info!(
             character_id,
-            character_name = %character.character_name,
+            character_name = %character_name,
             selected,
             "Updated character selection"
         );
@@ -582,9 +807,24 @@ impl SetDestoApp {
     }
 
     pub fn set_all_characters_selected(&mut self, selected: bool) {
+        if self.waypoint_send_in_progress() {
+            debug!("Ignoring bulk character selection because a waypoint send is in progress");
+            self.status_message = "Wait for the current waypoint send to finish".to_string();
+            return;
+        }
+
+        let changed = self
+            .characters
+            .iter()
+            .any(|character| character.selected != selected);
+        if !changed {
+            return;
+        }
+
         for character in &mut self.characters {
             character.selected = selected;
         }
+        self.clear_send_results();
         info!(
             selected,
             character_count = self.characters.len(),
@@ -594,9 +834,20 @@ impl SetDestoApp {
     }
 
     pub fn invert_character_selection(&mut self) {
+        if self.waypoint_send_in_progress() {
+            debug!("Ignoring invert character selection because a waypoint send is in progress");
+            self.status_message = "Wait for the current waypoint send to finish".to_string();
+            return;
+        }
+
+        if self.characters.is_empty() {
+            return;
+        }
+
         for character in &mut self.characters {
             character.selected = !character.selected;
         }
+        self.clear_send_results();
         info!(
             selected_character_count = self.selected_character_count(),
             character_count = self.characters.len(),
@@ -685,6 +936,9 @@ impl SetDestoApp {
             &mut self.characters,
             CharacterState::from_login(character_config, character.access_token, expires_at),
         );
+        if !self.waypoint_send_in_progress() {
+            self.clear_send_results();
+        }
 
         Ok(())
     }
@@ -718,8 +972,17 @@ impl SetDestoApp {
         if self.pending_remove_character_id == Some(character_id) {
             self.pending_remove_character_id = None;
         }
+        self.clear_send_results();
 
         Ok(character_name)
+    }
+
+    fn clear_send_results(&mut self) {
+        for character in &mut self.characters {
+            character.last_send_result = None;
+        }
+        self.last_waypoint_batch = None;
+        self.last_waypoint_request = None;
     }
 
     fn save_character_selection(&mut self) {
@@ -844,30 +1107,39 @@ fn expires_at_from_now(expires_in: u64) -> SystemTime {
 
 fn start_waypoint_send(jobs: Vec<WaypointSendJob>, sender: Sender<WaypointSendEvent>) {
     thread::spawn(move || {
-        let mut handles = Vec::with_capacity(jobs.len());
+        let concurrency = MAX_CONCURRENT_WAYPOINT_SENDS.max(1);
+        let mut jobs = jobs.into_iter();
 
-        for job in jobs {
-            let sender = sender.clone();
-            handles.push(thread::spawn(move || {
-                let _ = sender.send(WaypointSendEvent::Started {
-                    character_id: job.character_id,
-                    character_name: job.character_name.clone(),
-                });
+        loop {
+            let mut handles = Vec::with_capacity(concurrency);
 
-                let result = run_waypoint_send_job(&job).map_err(|err| err.to_string());
-                let _ = sender.send(WaypointSendEvent::Finished {
-                    character_id: job.character_id,
-                    character_name: job.character_name,
-                    destination_name: job.destination_name,
-                    destination_id: job.destination_id,
-                    result,
-                });
-            }));
-        }
+            for job in jobs.by_ref().take(concurrency) {
+                let sender = sender.clone();
+                handles.push(thread::spawn(move || {
+                    let _ = sender.send(WaypointSendEvent::Started {
+                        character_id: job.character_id,
+                        character_name: job.character_name.clone(),
+                    });
 
-        for handle in handles {
-            if handle.join().is_err() {
-                error!("Waypoint send worker panicked");
+                    let result = run_waypoint_send_job(&job).map_err(|err| err.to_string());
+                    let _ = sender.send(WaypointSendEvent::Finished {
+                        character_id: job.character_id,
+                        character_name: job.character_name,
+                        destination_name: job.destination_name,
+                        destination_id: job.destination_id,
+                        result,
+                    });
+                }));
+            }
+
+            if handles.is_empty() {
+                break;
+            }
+
+            for handle in handles {
+                if handle.join().is_err() {
+                    error!("Waypoint send worker panicked");
+                }
             }
         }
 
@@ -939,6 +1211,13 @@ fn access_token_is_fresh(access_token: &Option<String>, expires_at: Option<Syste
     access_token.is_some()
         && expires_at
             .is_some_and(|expires_at| expires_at > SystemTime::now() + ACCESS_TOKEN_REFRESH_BUFFER)
+}
+
+fn has_failed_send_result(character: &CharacterState) -> bool {
+    matches!(
+        character.last_send_result.as_ref(),
+        Some(CharacterSendResult::Failed { .. })
+    )
 }
 
 fn upsert_character(characters: &mut Vec<CharacterState>, character: CharacterState) {

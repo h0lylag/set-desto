@@ -19,6 +19,8 @@ pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
 
     ui.add_space(16.0);
     render_actions(ui, app);
+
+    render_batch_summary(ui, app);
 }
 
 fn render_target_summary(ui: &mut egui::Ui, app: &SetDestoApp) {
@@ -84,4 +86,34 @@ fn render_actions(ui: &mut egui::Ui, app: &mut SetDestoApp) {
             app.characters.len()
         ));
     });
+}
+
+fn render_batch_summary(ui: &mut egui::Ui, app: &mut SetDestoApp) {
+    let Some(summary) = app.waypoint_batch_summary() else {
+        return;
+    };
+
+    ui.add_space(16.0);
+    ui.separator();
+    ui.add_space(8.0);
+
+    ui.horizontal(|ui| {
+        ui.strong(summary.summary_line());
+
+        if app.can_retry_failed_waypoints() && ui.button("Retry Failed").clicked() {
+            app.retry_failed_waypoints();
+        }
+    });
+
+    if summary.in_progress {
+        ui.add(
+            egui::ProgressBar::new(summary.progress_fraction())
+                .text(summary.progress_text())
+                .desired_width(f32::INFINITY),
+        );
+    }
+
+    if let Some(error) = summary.latest_error {
+        ui.label(format!("Latest error: {error}"));
+    }
 }
