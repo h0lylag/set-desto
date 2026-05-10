@@ -15,9 +15,16 @@ use tracing::{debug, info};
 use url::Url;
 
 pub const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:18421/callback";
+pub const SCOPE_WRITE_WAYPOINT: &str = "esi-ui.write_waypoint.v1";
+pub const SCOPE_SEARCH_STRUCTURES: &str = "esi-search.search_structures.v1";
+pub const SCOPE_READ_STRUCTURES: &str = "esi-universe.read_structures.v1";
 const METADATA_URL: &str = "https://login.eveonline.com/.well-known/oauth-authorization-server";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
-const SCOPES: &[&str] = &["esi-ui.write_waypoint.v1"];
+const SCOPES: &[&str] = &[
+    SCOPE_WRITE_WAYPOINT,
+    SCOPE_SEARCH_STRUCTURES,
+    SCOPE_READ_STRUCTURES,
+];
 
 #[derive(Clone, Debug)]
 pub struct SsoConfig {

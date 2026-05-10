@@ -8,6 +8,7 @@ pub enum DestinationKind {
     NumericId,
     SolarSystem,
     Station,
+    Structure,
 }
 
 impl DestinationKind {
@@ -16,15 +17,24 @@ impl DestinationKind {
             Self::NumericId => "numeric ID",
             Self::SolarSystem => "solar system",
             Self::Station => "station",
+            Self::Structure => "player structure",
         }
     }
 }
+
+pub const PLAYER_STRUCTURE_ID_MIN: i64 = 1_000_000_000_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedDestination {
     pub id: i64,
     pub name: String,
     pub kind: DestinationKind,
+}
+
+#[derive(Clone, Debug)]
+pub struct StructureResolutionContext {
+    pub character_id: u64,
+    pub access_token: String,
 }
 
 pub fn resolve(input: &str) -> Result<ResolvedDestination> {
@@ -44,8 +54,39 @@ pub fn resolve(input: &str) -> Result<ResolvedDestination> {
         kind: match destination.category {
             UniverseDestinationCategory::SolarSystem => DestinationKind::SolarSystem,
             UniverseDestinationCategory::Station => DestinationKind::Station,
+            UniverseDestinationCategory::Structure => DestinationKind::Structure,
         },
     })
+}
+
+pub fn resolve_structure(
+    input: &str,
+    context: &StructureResolutionContext,
+) -> Result<ResolvedDestination> {
+    let input = input.trim();
+    if input.is_empty() {
+        bail!("Destination required");
+    }
+
+    let destination = if let Some(structure_id) = player_structure_id(input)? {
+        universe::resolve_structure_id(&context.access_token, structure_id)?
+    } else {
+        universe::resolve_structure_name(context.character_id, &context.access_token, input)?
+    };
+
+    Ok(ResolvedDestination {
+        id: destination.id,
+        name: destination.name,
+        kind: match destination.category {
+            UniverseDestinationCategory::SolarSystem => DestinationKind::SolarSystem,
+            UniverseDestinationCategory::Station => DestinationKind::Station,
+            UniverseDestinationCategory::Structure => DestinationKind::Structure,
+        },
+    })
+}
+
+pub fn looks_like_player_structure_id(input: &str) -> bool {
+    matches!(player_structure_id(input), Ok(Some(_)))
 }
 
 fn resolve_numeric_id(input: &str) -> Result<ResolvedDestination> {
@@ -63,6 +104,19 @@ fn resolve_numeric_id(input: &str) -> Result<ResolvedDestination> {
         name: input.to_string(),
         kind: DestinationKind::NumericId,
     })
+}
+
+fn player_structure_id(input: &str) -> Result<Option<i64>> {
+    let input = input.trim();
+    if input.starts_with('-') || !input.chars().all(|character| character.is_ascii_digit()) {
+        return Ok(None);
+    }
+
+    let id = input
+        .parse::<i64>()
+        .with_context(|| format!("Destination ID `{input}` was not a valid ESI ID"))?;
+
+    Ok((id >= PLAYER_STRUCTURE_ID_MIN).then_some(id))
 }
 
 #[cfg(test)]
@@ -93,5 +147,13 @@ mod tests {
     fn rejects_empty_destination() {
         let err = resolve("  ").unwrap_err().to_string();
         assert!(err.contains("Destination required"));
+    }
+
+    #[test]
+    fn detects_player_structure_ids() {
+        assert!(looks_like_player_structure_id("1046802738801"));
+        assert!(!looks_like_player_structure_id("30000142"));
+        assert!(!looks_like_player_structure_id("-1046802738801"));
+        assert!(!looks_like_player_structure_id("Jita"));
     }
 }

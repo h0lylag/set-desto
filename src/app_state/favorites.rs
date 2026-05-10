@@ -1,8 +1,6 @@
 use anyhow::{Context, Result};
 use tracing::{error, warn};
 
-use crate::domain::destination;
-
 use super::SetDestoApp;
 use super::models::{FavoriteDestination, ResolvedDestinationDisplay};
 
@@ -14,7 +12,7 @@ impl SetDestoApp {
             return;
         }
 
-        let resolved_destination = match destination::resolve(&destination) {
+        let resolved_destination = match self.resolve_destination_input(&destination) {
             Ok(destination) => destination,
             Err(err) => {
                 warn!(destination = %destination, error = ?err, "Favorite resolution failed");
