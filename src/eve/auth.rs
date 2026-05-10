@@ -50,6 +50,14 @@ pub struct AuthenticatedCharacter {
     pub expires_in: u64,
 }
 
+pub struct RefreshedAccessToken {
+    pub character_id: u64,
+    pub scopes: Vec<String>,
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_in: u64,
+}
+
 pub type LoginResult = Result<AuthenticatedCharacter, String>;
 
 pub fn start_login(config: SsoConfig) -> Receiver<LoginResult> {
@@ -236,6 +244,9 @@ fn exchange_code(
         .json()
         .context("Failed to parse EVE SSO token response")?;
 
+    let refresh_token = token_response
+        .refresh_token
+        .ok_or_else(|| anyhow!("EVE SSO token response did not include a refresh token"))?;
     let claims = parse_access_token_claims(&token_response.access_token)?;
     let character_id = claims
         .sub
@@ -255,6 +266,56 @@ fn exchange_code(
     Ok(AuthenticatedCharacter {
         character_id,
         character_name: claims.name,
+        scopes: claims.scp,
+        access_token: token_response.access_token,
+        refresh_token,
+        expires_in: token_response.expires_in,
+    })
+}
+
+pub fn refresh_access_token(
+    config: &SsoConfig,
+    refresh_token: &str,
+) -> Result<RefreshedAccessToken> {
+    info!("Refreshing EVE SSO access token");
+    let client = Client::builder()
+        .user_agent(format!("set-desto/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+        .context("Failed to build HTTP client")?;
+    let metadata = fetch_metadata(&client)?;
+
+    let token_response: TokenResponse = client
+        .post(&metadata.token_endpoint)
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("client_id", &config.client_id),
+        ])
+        .send()
+        .context("Failed to refresh EVE SSO access token")?
+        .error_for_status()
+        .context("EVE SSO token refresh failed")?
+        .json()
+        .context("Failed to parse EVE SSO refresh response")?;
+
+    let claims = parse_access_token_claims(&token_response.access_token)?;
+    let character_id = claims
+        .sub
+        .strip_prefix("CHARACTER:EVE:")
+        .ok_or_else(|| anyhow!("EVE SSO token subject was not a character"))?
+        .parse()
+        .context("Failed to parse EVE character ID from refreshed SSO token")?;
+
+    info!(
+        character_id,
+        scope_count = claims.scp.len(),
+        expires_in = token_response.expires_in,
+        refresh_token_rotated = token_response.refresh_token.is_some(),
+        "EVE SSO token refresh succeeded"
+    );
+
+    Ok(RefreshedAccessToken {
+        character_id,
         scopes: claims.scp,
         access_token: token_response.access_token,
         refresh_token: token_response.refresh_token,
@@ -340,7 +401,7 @@ struct SsoMetadata {
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
     access_token: String,
-    refresh_token: String,
+    refresh_token: Option<String>,
     expires_in: u64,
 }
 

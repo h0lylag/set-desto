@@ -1,12 +1,16 @@
 use std::sync::mpsc::Receiver;
+use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use eframe::egui;
 use tracing::{debug, error, info, warn};
 
 use crate::eve::auth::{self, AuthenticatedCharacter, LoginResult, SsoConfig};
+use crate::eve::waypoints::{self, WaypointOptions};
 use crate::storage::config::{AppConfig, CharacterConfig};
 use crate::storage::tokens::{KeyringTokenStore, TokenStore};
+
+const ACCESS_TOKEN_REFRESH_BUFFER: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DestoMode {
@@ -146,6 +150,15 @@ impl SetDestoApp {
             return;
         }
 
+        let destination_id = match parse_destination_id(&destination) {
+            Ok(destination_id) => destination_id,
+            Err(err) => {
+                warn!(destination = %destination, error = ?err, "Destination parsing failed");
+                self.status_message = err.to_string();
+                return;
+            }
+        };
+
         let characters_with_access_tokens = self
             .characters
             .iter()
@@ -162,19 +175,57 @@ impl SetDestoApp {
 
         if self.characters.is_empty() {
             warn!("Set Destination requested with no characters added");
-        } else if characters_with_access_tokens == 0 {
-            warn!(
-                "Set Destination requested but no character has an access token loaded; token refresh is not implemented yet"
-            );
+            self.status_message = "Add at least one character first".to_string();
+            return;
         }
 
-        warn!(
-            destination = %destination,
-            "Waypoint sending is not implemented yet; no ESI request was sent"
-        );
+        let options = WaypointOptions {
+            add_to_beginning: self.pin_destination,
+            clear_other_waypoints: !self.pin_destination,
+        };
+        let mut successes = 0_usize;
+        let mut failures = Vec::new();
 
-        self.status_message =
-            format!("Waypoint sending not implemented yet for destination: {destination}");
+        for index in 0..self.characters.len() {
+            let character_id = self.characters[index].character_id;
+            let character_name = self.characters[index].character_name.clone();
+            let result = self
+                .access_token_for_character(index)
+                .and_then(|access_token| {
+                    waypoints::set_waypoint(&access_token, destination_id, options)
+                });
+
+            match result {
+                Ok(()) => {
+                    successes += 1;
+                    info!(
+                        character_id,
+                        character_name, destination_id, "Set waypoint for character"
+                    );
+                }
+                Err(err) => {
+                    error!(
+                        character_id,
+                        character_name,
+                        destination_id,
+                        error = ?err,
+                        "Failed to set waypoint for character"
+                    );
+                    failures.push(format!("{character_name}: {err}"));
+                }
+            }
+        }
+
+        if failures.is_empty() {
+            self.status_message =
+                format!("Set destination {destination_id} for {successes} characters");
+        } else {
+            self.status_message = format!(
+                "Set destination for {successes}/{} characters; first error: {}",
+                self.characters.len(),
+                failures[0]
+            );
+        }
     }
 
     pub fn clear_destination_form(&mut self) {
@@ -217,6 +268,52 @@ impl SetDestoApp {
 
         Ok(())
     }
+
+    fn access_token_for_character(&mut self, index: usize) -> Result<String> {
+        let character = self
+            .characters
+            .get(index)
+            .ok_or_else(|| anyhow!("Character index {index} was out of range"))?;
+
+        if character.access_token_is_fresh() {
+            return character
+                .access_token
+                .clone()
+                .ok_or_else(|| anyhow!("Character access token was unexpectedly missing"));
+        }
+
+        let character_id = character.character_id;
+        let character_name = character.character_name.clone();
+        info!(
+            character_id,
+            character_name, "Refreshing access token before ESI request"
+        );
+
+        let refresh_token = self.token_store.load_refresh_token(character_id)?;
+        let config = SsoConfig::from_env()?;
+        let refreshed = auth::refresh_access_token(&config, &refresh_token)?;
+
+        if refreshed.character_id != character_id {
+            bail!(
+                "Refreshed token character mismatch: expected {character_id}, got {}",
+                refreshed.character_id
+            );
+        }
+
+        if let Some(refresh_token) = &refreshed.refresh_token {
+            self.token_store
+                .save_refresh_token(character_id, refresh_token)?;
+        }
+
+        let access_token = refreshed.access_token.clone();
+        self.characters[index].update_access_token(
+            refreshed.access_token,
+            refreshed.expires_in,
+            refreshed.scopes,
+        );
+
+        Ok(access_token)
+    }
 }
 
 #[derive(Debug)]
@@ -225,7 +322,7 @@ pub struct CharacterState {
     pub character_name: String,
     pub scopes: Vec<String>,
     access_token: Option<String>,
-    expires_in: Option<u64>,
+    expires_at: Option<Instant>,
     refresh_token_saved: bool,
 }
 
@@ -236,7 +333,7 @@ impl CharacterState {
             character_name: character.character_name,
             scopes: character.scopes,
             access_token: None,
-            expires_in: None,
+            expires_at: None,
             refresh_token_saved: true,
         }
     }
@@ -247,7 +344,7 @@ impl CharacterState {
             character_name: character.character_name,
             scopes: character.scopes,
             access_token: Some(access_token),
-            expires_in: Some(expires_in),
+            expires_at: Some(expires_at_from_now(expires_in)),
             refresh_token_saved: true,
         }
     }
@@ -256,9 +353,27 @@ impl CharacterState {
         self.access_token.is_some()
     }
 
+    fn access_token_is_fresh(&self) -> bool {
+        self.access_token.is_some()
+            && self
+                .expires_at
+                .is_some_and(|expires_at| expires_at > Instant::now() + ACCESS_TOKEN_REFRESH_BUFFER)
+    }
+
+    fn update_access_token(&mut self, access_token: String, expires_in: u64, scopes: Vec<String>) {
+        self.access_token = Some(access_token);
+        self.expires_at = Some(expires_at_from_now(expires_in));
+        self.scopes = scopes;
+    }
+
     pub fn token_summary(&self) -> String {
-        let access_status = match (&self.access_token, self.expires_in) {
-            (Some(_), Some(expires_in)) => format!("access token loaded, expires in {expires_in}s"),
+        let access_status = match (&self.access_token, self.expires_at) {
+            (Some(_), Some(expires_at)) => {
+                let remaining = expires_at
+                    .saturating_duration_since(Instant::now())
+                    .as_secs();
+                format!("access token loaded, expires in {remaining}s")
+            }
             (Some(_), None) => "access token loaded".to_string(),
             (None, _) => "access token needs refresh".to_string(),
         };
@@ -275,6 +390,23 @@ impl CharacterState {
     }
 }
 
+fn parse_destination_id(destination: &str) -> Result<i64> {
+    let destination_id = destination.trim().parse::<i64>().with_context(|| {
+        "Destination name resolution is not implemented yet; enter a numeric ESI destination ID"
+            .to_string()
+    })?;
+
+    if destination_id <= 0 {
+        bail!("Destination ID must be a positive ESI ID");
+    }
+
+    Ok(destination_id)
+}
+
+fn expires_at_from_now(expires_in: u64) -> Instant {
+    Instant::now() + Duration::from_secs(expires_in)
+}
+
 fn upsert_character(characters: &mut Vec<CharacterState>, character: CharacterState) {
     if let Some(existing) = characters
         .iter_mut()
@@ -283,5 +415,27 @@ fn upsert_character(characters: &mut Vec<CharacterState>, character: CharacterSt
         *existing = character;
     } else {
         characters.push(character);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_numeric_destination_id() {
+        assert_eq!(parse_destination_id("30000142").unwrap(), 30000142);
+    }
+
+    #[test]
+    fn rejects_destination_names_until_resolution_exists() {
+        let err = parse_destination_id("Jita").unwrap_err().to_string();
+        assert!(err.contains("Destination name resolution is not implemented yet"));
+    }
+
+    #[test]
+    fn rejects_non_positive_destination_id() {
+        let err = parse_destination_id("0").unwrap_err().to_string();
+        assert!(err.contains("positive ESI ID"));
     }
 }
