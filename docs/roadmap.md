@@ -7,10 +7,10 @@ This is the remaining implementation plan from the current SSO proof of life to 
 - Egui app scaffold is in place.
 - Manual and Clipboard destination modes exist, with Clipboard still a stub.
 - EVE SSO Authorization Code with PKCE works through a loopback callback.
-- Add Character can authenticate a character, keep the access token in memory, save non-secret metadata to config, and save the refresh token in the OS keyring.
-- Refresh tokens are persisted through the OS keyring.
-- Tokens are not refreshed yet.
-- No ESI waypoint calls are wired yet.
+- Add Character can authenticate a character, save non-secret metadata to config, and persist tokens in the OS keyring.
+- Access tokens are cached with an absolute expiry timestamp and reused until they are close to expiry.
+- Refresh tokens are persisted through the OS keyring and used to renew stale access tokens before ESI calls.
+- ESI waypoint calls are wired for numeric destination IDs.
 
 ## 1. Cross-Platform Storage
 
@@ -28,7 +28,7 @@ Goal: persist characters safely across restarts without storing refresh tokens i
   - granted scopes
   - token/keyring entry identifier
 - Refresh tokens are stored only in the OS keyring.
-- Access tokens are kept only in memory.
+- Access tokens are cached in the OS keyring with expiry metadata so restarts do not force a refresh when the token is still valid.
 - Add remove/logout behavior:
   - delete character metadata
   - delete keyring refresh token
@@ -162,4 +162,4 @@ When adding files used by the Rust crate, make sure they are tracked by git befo
 
 ## Suggested Next Step
 
-Implement a first `TokenManager`. That gives the app automatic refresh, which is the foundation needed before wiring waypoint calls.
+Implement destination name resolution. The waypoint flow now needs to turn input like `Kedama` into an ESI destination ID before it can be useful in normal play.

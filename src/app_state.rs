@@ -1,5 +1,5 @@
 use std::sync::mpsc::Receiver;
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow, bail};
 use eframe::egui;
@@ -62,11 +62,12 @@ impl SetDestoApp {
                 )
             }
         };
+        let token_store = KeyringTokenStore;
         let characters = config
             .characters
             .iter()
             .cloned()
-            .map(CharacterState::from_config)
+            .map(|character| CharacterState::from_config(character, &token_store))
             .collect();
 
         Self {
@@ -79,7 +80,7 @@ impl SetDestoApp {
             status_message,
             config,
             login_receiver: None,
-            token_store: KeyringTokenStore,
+            token_store,
         }
     }
 
@@ -236,6 +237,7 @@ impl SetDestoApp {
     }
 
     fn save_logged_in_character(&mut self, character: AuthenticatedCharacter) -> Result<()> {
+        let expires_at = expires_at_from_now(character.expires_in);
         let character_config = CharacterConfig {
             character_id: character.character_id,
             character_name: character.character_name.clone(),
@@ -251,6 +253,11 @@ impl SetDestoApp {
         );
         self.token_store
             .save_refresh_token(character.character_id, &character.refresh_token)?;
+        self.token_store.save_access_token(
+            character.character_id,
+            &character.access_token,
+            expires_at,
+        )?;
 
         self.config.upsert_character(character_config.clone());
         self.config
@@ -259,11 +266,7 @@ impl SetDestoApp {
 
         upsert_character(
             &mut self.characters,
-            CharacterState::from_login(
-                character_config,
-                character.access_token,
-                character.expires_in,
-            ),
+            CharacterState::from_login(character_config, character.access_token, expires_at),
         );
 
         Ok(())
@@ -276,6 +279,11 @@ impl SetDestoApp {
             .ok_or_else(|| anyhow!("Character index {index} was out of range"))?;
 
         if character.access_token_is_fresh() {
+            debug!(
+                character_id = character.character_id,
+                character_name = %character.character_name,
+                "Using cached EVE SSO access token"
+            );
             return character
                 .access_token
                 .clone()
@@ -305,10 +313,14 @@ impl SetDestoApp {
                 .save_refresh_token(character_id, refresh_token)?;
         }
 
+        let expires_at = expires_at_from_now(refreshed.expires_in);
+        self.token_store
+            .save_access_token(character_id, &refreshed.access_token, expires_at)?;
+
         let access_token = refreshed.access_token.clone();
         self.characters[index].update_access_token(
             refreshed.access_token,
-            refreshed.expires_in,
+            expires_at,
             refreshed.scopes,
         );
 
@@ -322,29 +334,48 @@ pub struct CharacterState {
     pub character_name: String,
     pub scopes: Vec<String>,
     access_token: Option<String>,
-    expires_at: Option<Instant>,
+    expires_at: Option<SystemTime>,
     refresh_token_saved: bool,
 }
 
 impl CharacterState {
-    fn from_config(character: CharacterConfig) -> Self {
+    fn from_config(character: CharacterConfig, token_store: &impl TokenStore) -> Self {
+        let cached_access_token = match token_store.load_access_token(character.character_id) {
+            Ok(token) => token,
+            Err(err) => {
+                warn!(
+                    character_id = character.character_id,
+                    error = ?err,
+                    "Failed to load cached access token"
+                );
+                None
+            }
+        };
+        let (access_token, expires_at) = cached_access_token
+            .map(|token| (Some(token.access_token), Some(token.expires_at)))
+            .unwrap_or((None, None));
+
         Self {
             character_id: character.character_id,
             character_name: character.character_name,
             scopes: character.scopes,
-            access_token: None,
-            expires_at: None,
+            access_token,
+            expires_at,
             refresh_token_saved: true,
         }
     }
 
-    fn from_login(character: CharacterConfig, access_token: String, expires_in: u64) -> Self {
+    fn from_login(
+        character: CharacterConfig,
+        access_token: String,
+        expires_at: SystemTime,
+    ) -> Self {
         Self {
             character_id: character.character_id,
             character_name: character.character_name,
             scopes: character.scopes,
             access_token: Some(access_token),
-            expires_at: Some(expires_at_from_now(expires_in)),
+            expires_at: Some(expires_at),
             refresh_token_saved: true,
         }
     }
@@ -355,25 +386,31 @@ impl CharacterState {
 
     fn access_token_is_fresh(&self) -> bool {
         self.access_token.is_some()
-            && self
-                .expires_at
-                .is_some_and(|expires_at| expires_at > Instant::now() + ACCESS_TOKEN_REFRESH_BUFFER)
+            && self.expires_at.is_some_and(|expires_at| {
+                expires_at > SystemTime::now() + ACCESS_TOKEN_REFRESH_BUFFER
+            })
     }
 
-    fn update_access_token(&mut self, access_token: String, expires_in: u64, scopes: Vec<String>) {
+    fn update_access_token(
+        &mut self,
+        access_token: String,
+        expires_at: SystemTime,
+        scopes: Vec<String>,
+    ) {
         self.access_token = Some(access_token);
-        self.expires_at = Some(expires_at_from_now(expires_in));
+        self.expires_at = Some(expires_at);
         self.scopes = scopes;
     }
 
     pub fn token_summary(&self) -> String {
         let access_status = match (&self.access_token, self.expires_at) {
-            (Some(_), Some(expires_at)) => {
-                let remaining = expires_at
-                    .saturating_duration_since(Instant::now())
-                    .as_secs();
-                format!("access token loaded, expires in {remaining}s")
-            }
+            (Some(_), Some(expires_at)) => match expires_at.duration_since(SystemTime::now()) {
+                Ok(remaining) => {
+                    let remaining = remaining.as_secs();
+                    format!("access token loaded, expires in {remaining}s")
+                }
+                Err(_) => "access token expired".to_string(),
+            },
             (Some(_), None) => "access token loaded".to_string(),
             (None, _) => "access token needs refresh".to_string(),
         };
@@ -403,8 +440,8 @@ fn parse_destination_id(destination: &str) -> Result<i64> {
     Ok(destination_id)
 }
 
-fn expires_at_from_now(expires_in: u64) -> Instant {
-    Instant::now() + Duration::from_secs(expires_in)
+fn expires_at_from_now(expires_in: u64) -> SystemTime {
+    SystemTime::now() + Duration::from_secs(expires_in)
 }
 
 fn upsert_character(characters: &mut Vec<CharacterState>, character: CharacterState) {
