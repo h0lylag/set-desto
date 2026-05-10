@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use tracing::{debug, info};
 use url::Url;
 
-const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:18421/callback";
+pub const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:18421/callback";
 const METADATA_URL: &str = "https://login.eveonline.com/.well-known/oauth-authorization-server";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 const SCOPES: &[&str] = &["esi-ui.write_waypoint.v1"];
@@ -26,18 +26,21 @@ pub struct SsoConfig {
 }
 
 impl SsoConfig {
-    pub fn from_env() -> Result<Self> {
-        let client_id = std::env::var("SET_DESTO_EVE_CLIENT_ID")
-            .context("Set SET_DESTO_EVE_CLIENT_ID to your EVE developer app client ID")?;
-
-        let redirect_uri = std::env::var("SET_DESTO_EVE_REDIRECT_URI")
-            .unwrap_or_else(|_| DEFAULT_REDIRECT_URI.to_string());
+    pub fn from_client_id(client_id: &str) -> Result<Self> {
+        let client_id = client_id.trim();
+        if client_id.is_empty() {
+            bail!("Save your EVE application Client ID in the ESI tab");
+        }
 
         Ok(Self {
-            client_id,
-            redirect_uri,
+            client_id: client_id.to_string(),
+            redirect_uri: redirect_uri(),
         })
     }
+}
+
+pub fn redirect_uri() -> String {
+    std::env::var("SET_DESTO_EVE_REDIRECT_URI").unwrap_or_else(|_| DEFAULT_REDIRECT_URI.to_string())
 }
 
 #[derive(Debug)]

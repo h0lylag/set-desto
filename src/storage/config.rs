@@ -11,6 +11,8 @@ const CONFIG_FILE: &str = "config.json";
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct AppConfig {
     #[serde(default)]
+    pub esi: EsiConfig,
+    #[serde(default)]
     pub characters: Vec<CharacterConfig>,
 }
 
@@ -78,6 +80,12 @@ impl AppConfig {
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct EsiConfig {
+    #[serde(default)]
+    pub client_id: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CharacterConfig {
     pub character_id: u64,
@@ -137,6 +145,18 @@ mod tests {
         .expect("character config should deserialize");
 
         assert!(character.selected);
+    }
+
+    #[test]
+    fn missing_esi_config_defaults_to_empty_client_id() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{
+                "characters": []
+            }"#,
+        )
+        .expect("app config should deserialize");
+
+        assert!(config.esi.client_id.is_empty());
     }
 
     #[test]

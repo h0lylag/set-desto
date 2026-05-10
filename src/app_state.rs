@@ -34,6 +34,7 @@ impl DestoMode {
 pub enum AppTab {
     Destination,
     Characters,
+    Esi,
 }
 
 impl AppTab {
@@ -41,6 +42,7 @@ impl AppTab {
         match self {
             Self::Destination => "Set Destination",
             Self::Characters => "Characters",
+            Self::Esi => "ESI",
         }
     }
 }
@@ -197,6 +199,7 @@ struct WaypointSendJob {
     destination_id: i64,
     options: WaypointOptions,
     token_store: KeyringTokenStore,
+    sso_config: SsoConfig,
 }
 
 #[derive(Debug)]
@@ -235,6 +238,7 @@ pub struct SetDestoApp {
     pub pin_destination: bool,
     pub mode: DestoMode,
     pub status_message: String,
+    pub esi_client_id: String,
     pub pending_remove_character_id: Option<u64>,
     config: AppConfig,
     login_receiver: Option<Receiver<LoginResult>>,
@@ -268,6 +272,7 @@ impl SetDestoApp {
             }
         };
         let token_store = KeyringTokenStore;
+        let esi_client_id = config.esi.client_id.clone();
         let characters = config
             .characters
             .iter()
@@ -283,6 +288,7 @@ impl SetDestoApp {
             pin_destination: false,
             mode: DestoMode::Manual,
             status_message,
+            esi_client_id,
             pending_remove_character_id: None,
             config,
             login_receiver: None,
@@ -362,6 +368,40 @@ impl SetDestoApp {
         self.start_waypoint_send_batch(request, target_ids, 0, false);
     }
 
+    pub fn esi_client_id_is_saved(&self) -> bool {
+        let client_id = self.esi_client_id.trim();
+        !client_id.is_empty() && client_id == self.config.esi.client_id.trim()
+    }
+
+    pub fn esi_client_id_is_configured(&self) -> bool {
+        !self.esi_client_id.trim().is_empty()
+    }
+
+    pub fn effective_redirect_uri(&self) -> String {
+        auth::redirect_uri()
+    }
+
+    pub fn save_esi_settings(&mut self) {
+        let client_id = self.esi_client_id.trim().to_string();
+        if client_id.is_empty() {
+            self.status_message = "EVE application Client ID required".to_string();
+            return;
+        }
+
+        self.config.esi.client_id = client_id;
+        match self.config.save() {
+            Ok(()) => {
+                self.esi_client_id = self.config.esi.client_id.clone();
+                self.status_message = "Saved ESI settings".to_string();
+                info!("Saved ESI settings");
+            }
+            Err(err) => {
+                error!(error = ?err, "Failed to save ESI settings");
+                self.status_message = format!("Failed to save ESI settings: {err}");
+            }
+        }
+    }
+
     pub fn start_character_login(&mut self) {
         if self.login_in_progress() {
             debug!("Ignoring Add Character click because login is already in progress");
@@ -374,7 +414,7 @@ impl SetDestoApp {
             return;
         }
 
-        let config = match SsoConfig::from_env() {
+        let config = match self.sso_config() {
             Ok(config) => config,
             Err(err) => {
                 warn!(error = ?err, "Cannot start EVE SSO login");
@@ -533,9 +573,18 @@ impl SetDestoApp {
         skipped: usize,
         mark_non_targets_skipped: bool,
     ) {
+        let sso_config = match self.sso_config() {
+            Ok(config) => config,
+            Err(err) => {
+                warn!(error = ?err, "Cannot start waypoint send");
+                self.status_message = err.to_string();
+                self.active_tab = AppTab::Esi;
+                return;
+            }
+        };
         self.prepare_send_results(&request, &target_ids, mark_non_targets_skipped);
 
-        let jobs = self.waypoint_send_jobs(&request, &target_ids);
+        let jobs = self.waypoint_send_jobs(&request, &target_ids, &sso_config);
         let total = jobs.len();
         let (sender, receiver) = mpsc::channel();
         start_waypoint_send(jobs, sender);
@@ -583,6 +632,7 @@ impl SetDestoApp {
         &self,
         request: &WaypointSendRequest,
         target_ids: &[u64],
+        sso_config: &SsoConfig,
     ) -> Vec<WaypointSendJob> {
         self.characters
             .iter()
@@ -596,6 +646,7 @@ impl SetDestoApp {
                 destination_id: request.destination_id,
                 options: request.options,
                 token_store: self.token_store,
+                sso_config: sso_config.clone(),
             })
             .collect()
     }
@@ -765,6 +816,10 @@ impl SetDestoApp {
         }
 
         summary
+    }
+
+    fn sso_config(&self) -> Result<SsoConfig> {
+        SsoConfig::from_client_id(&self.esi_client_id)
     }
 
     pub fn selected_character_count(&self) -> usize {
@@ -1177,8 +1232,7 @@ fn access_token_for_job(job: &WaypointSendJob) -> Result<(String, Option<AccessT
     );
 
     let refresh_token = job.token_store.load_refresh_token(job.character_id)?;
-    let config = SsoConfig::from_env()?;
-    let refreshed = auth::refresh_access_token(&config, &refresh_token)?;
+    let refreshed = auth::refresh_access_token(&job.sso_config, &refresh_token)?;
 
     if refreshed.character_id != job.character_id {
         bail!(

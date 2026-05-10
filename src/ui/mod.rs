@@ -4,6 +4,7 @@ use crate::app_state::SetDestoApp;
 
 mod characters;
 mod destination_form;
+mod esi_settings;
 mod header;
 mod main_panel;
 mod status_bar;
