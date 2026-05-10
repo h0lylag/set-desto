@@ -1,0 +1,18 @@
+[package]
+name = "set-desto"
+version = "0.1.0"
+edition = "2024"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
+
+[dependencies]
+anyhow = "1.0.100"
+clap = { version = "4.5", features = ["derive"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
+
+eframe = { version = "0.33.2", default-features = false, features = ["glow", "x11"] }
+egui = "0.33.2"

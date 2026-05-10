@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.h0lylag.setdesto</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Set Desto</name>
+  <summary>Set Desto desktop utility</summary>
+  <description>
+    <p>Set Desto is a small desktop utility built with egui.</p>
+  </description>
+  <launchable type="desktop-id">set-desto.desktop</launchable>
+  <releases>
+    <release version="0.1.0" date="2026-05-10"/>
+  </releases>
+</component>

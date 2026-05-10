@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Set Desto
+GenericName=Destination Utility
+Comment=Set Desto desktop utility
+Exec=set-desto
+Icon=com.h0lylag.setdesto
+Terminal=false
+Categories=Utility;Game;
