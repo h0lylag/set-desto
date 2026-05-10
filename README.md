@@ -1,6 +1,6 @@
 # Set Desto
 
-Set Desto is a Rust desktop utility scaffolded with `eframe`/`egui` and the same basic Nix package/dev-shell structure used by EVE Preview Manager.
+Set Desto is a Rust desktop utility for setting EVE Online autopilot destinations across selected authenticated characters. It is built with `eframe`/`egui`, uses EVE SSO with PKCE, and stores tokens in the OS keyring.
 
 ## Development
 
@@ -36,4 +36,12 @@ Characters can be selected individually; Set Destination only targets selected c
 ```bash
 cargo build --release
 nix build
+```
+
+## Verification
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
 ```

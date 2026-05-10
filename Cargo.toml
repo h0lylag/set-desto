@@ -1,7 +1,13 @@
 [package]
 name = "set-desto"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
+rust-version = "1.85"
+description = "Desktop utility for setting EVE Online autopilot destinations across authenticated characters."
+license = "MIT"
+readme = "README.md"
+keywords = ["eve-online", "esi", "egui", "desktop"]
+categories = ["gui"]
 
 [profile.release]
 lto = true

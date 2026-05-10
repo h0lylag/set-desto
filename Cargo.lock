@@ -2612,7 +2612,7 @@ dependencies = [
 
 [[package]]
 name = "set-desto"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "base64",
