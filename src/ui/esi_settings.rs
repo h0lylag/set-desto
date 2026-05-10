@@ -12,6 +12,14 @@ pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
             .hint_text("EVE application client ID")
             .desired_width(f32::INFINITY),
     );
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Create an ESI application at");
+        ui.hyperlink_to(
+            "EVE Developers",
+            "https://developers.eveonline.com/applications",
+        );
+        ui.label("and paste its Client ID here.");
+    });
 
     ui.add_space(8.0);
     ui.horizontal(|ui| {
