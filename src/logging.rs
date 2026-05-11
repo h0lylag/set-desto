@@ -12,6 +12,7 @@ pub fn init(debug_mode: bool) {
 
     let subscriber = FmtSubscriber::builder()
         .with_env_filter(filter)
+        .with_ansi(!cfg!(target_os = "windows"))
         .with_target(true)
         .with_thread_ids(debug_mode)
         .finish();
