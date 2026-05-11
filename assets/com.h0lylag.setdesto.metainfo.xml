@@ -8,7 +8,7 @@
   <description>
     <p>Set Desto is a small desktop utility for EVE Online pilots who want to set autopilot destinations across selected authenticated characters.</p>
   </description>
-  <launchable type="desktop-id">set-desto.desktop</launchable>
+  <launchable type="desktop-id">com.h0lylag.setdesto.desktop</launchable>
   <releases>
     <release version="0.0.1" date="2026-05-10"/>
   </releases>
