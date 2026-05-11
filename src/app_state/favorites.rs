@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use tracing::{error, warn};
 
-use super::SetDestoApp;
 use super::models::{FavoriteDestination, ResolvedDestinationDisplay};
+use super::{SetDestoApp, favorite_nickname_edits};
 
 impl SetDestoApp {
     pub fn add_favorite_from_input(&mut self) {
@@ -27,16 +27,6 @@ impl SetDestoApp {
         if self.save_favorite(favorite).is_ok() {
             self.favorite_destination_input.clear();
         }
-    }
-
-    pub fn add_resolved_destination_to_favorites(&mut self) {
-        let Some(destination) = &self.last_resolved_destination else {
-            self.status_message = "Resolve or send a destination before adding it".to_string();
-            return;
-        };
-
-        let favorite = FavoriteDestination::from_resolved(destination);
-        let _ = self.save_favorite(favorite);
     }
 
     pub fn request_remove_favorite_destination(&mut self, destination_id: i64) {
@@ -87,6 +77,66 @@ impl SetDestoApp {
                 self.status_message = format!("Failed to remove favorite: {err}");
             }
         }
+    }
+
+    pub fn save_favorite_nickname(&mut self, destination_id: i64) {
+        let nickname = self
+            .favorite_nickname_edits
+            .get(&destination_id)
+            .cloned()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let Some(favorite) = self
+            .favorites
+            .iter()
+            .find(|favorite| favorite.destination_id == destination_id)
+        else {
+            self.status_message = "Favorite destination not found".to_string();
+            return;
+        };
+        let favorite_name = favorite.destination_name.clone();
+
+        let mut config = self.config.clone();
+        let Some(config_favorite) = config
+            .favorites
+            .iter_mut()
+            .find(|favorite| favorite.destination_id == destination_id)
+        else {
+            self.status_message = "Favorite destination not found".to_string();
+            return;
+        };
+
+        config_favorite.nickname = nickname.clone();
+        match config.save() {
+            Ok(()) => {
+                self.config = config;
+                self.sync_favorites_from_config();
+                self.status_message = if nickname.is_empty() {
+                    format!("Cleared nickname for {favorite_name}")
+                } else {
+                    format!("Saved nickname {nickname} for {favorite_name}")
+                };
+            }
+            Err(err) => {
+                error!(destination_id, error = ?err, "Failed to save favorite nickname");
+                self.status_message = format!("Failed to save favorite nickname: {err}");
+            }
+        }
+    }
+
+    pub fn reset_favorite_nickname_edit(&mut self, destination_id: i64) {
+        let Some(favorite) = self
+            .favorites
+            .iter()
+            .find(|favorite| favorite.destination_id == destination_id)
+        else {
+            self.status_message = "Favorite destination not found".to_string();
+            return;
+        };
+
+        self.favorite_nickname_edits
+            .insert(destination_id, favorite.nickname.clone());
     }
 
     pub fn set_favorite_destination(&mut self, destination_id: i64) {
@@ -146,10 +196,12 @@ impl SetDestoApp {
             .map(FavoriteDestination::from_config)
             .collect();
         self.favorites.sort_by(|left, right| {
-            left.destination_name
+            left.display_name()
                 .to_lowercase()
-                .cmp(&right.destination_name.to_lowercase())
+                .cmp(&right.display_name().to_lowercase())
+                .then_with(|| left.destination_name.cmp(&right.destination_name))
                 .then_with(|| left.destination_id.cmp(&right.destination_id))
         });
+        self.favorite_nickname_edits = favorite_nickname_edits(&self.favorites);
     }
 }

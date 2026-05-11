@@ -161,6 +161,7 @@ pub struct FavoriteDestination {
     pub destination_id: i64,
     pub destination_name: String,
     pub destination_kind: String,
+    pub nickname: String,
 }
 
 impl FavoriteDestination {
@@ -169,6 +170,7 @@ impl FavoriteDestination {
             destination_id: config.destination_id,
             destination_name: config.destination_name,
             destination_kind: config.destination_kind,
+            nickname: config.nickname,
         }
     }
 
@@ -177,6 +179,7 @@ impl FavoriteDestination {
             destination_id: self.destination_id,
             destination_name: self.destination_name,
             destination_kind: self.destination_kind,
+            nickname: self.nickname,
         }
     }
 
@@ -185,14 +188,17 @@ impl FavoriteDestination {
             destination_id: destination.id,
             destination_name: destination.name.clone(),
             destination_kind: destination.kind_label.clone(),
+            nickname: String::new(),
         }
     }
 
-    pub fn summary(&self) -> String {
-        format!(
-            "{} ({}) - {}",
-            self.destination_name, self.destination_id, self.destination_kind
-        )
+    pub fn display_name(&self) -> &str {
+        let nickname = self.nickname.trim();
+        if nickname.is_empty() {
+            &self.destination_name
+        } else {
+            nickname
+        }
     }
 }
 

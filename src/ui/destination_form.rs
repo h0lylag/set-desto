@@ -54,7 +54,7 @@ fn render_favorite_buttons(ui: &mut egui::Ui, app: &mut SetDestoApp) {
     let favorites: Vec<(i64, String)> = app
         .favorites
         .iter()
-        .map(|favorite| (favorite.destination_id, favorite.destination_name.clone()))
+        .map(|favorite| (favorite.destination_id, favorite.display_name().to_string()))
         .collect();
     let favorite_send_enabled = app.favorite_send_enabled();
 

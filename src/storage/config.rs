@@ -126,6 +126,8 @@ pub struct FavoriteDestinationConfig {
     pub destination_id: i64,
     pub destination_name: String,
     pub destination_kind: String,
+    #[serde(default)]
+    pub nickname: String,
 }
 
 pub fn config_path() -> Result<PathBuf> {
@@ -239,16 +241,33 @@ mod tests {
             destination_id: 30000142,
             destination_name: "Old Jita".to_string(),
             destination_kind: "solar system".to_string(),
+            nickname: "Market".to_string(),
         });
 
         config.upsert_favorite(FavoriteDestinationConfig {
             destination_id: 30000142,
             destination_name: "Jita".to_string(),
             destination_kind: "solar system".to_string(),
+            nickname: "Trade Hub".to_string(),
         });
 
         assert_eq!(config.favorites.len(), 1);
         assert_eq!(config.favorites[0].destination_name, "Jita");
+        assert_eq!(config.favorites[0].nickname, "Trade Hub");
+    }
+
+    #[test]
+    fn missing_favorite_nickname_defaults_to_empty_string() {
+        let favorite: FavoriteDestinationConfig = serde_json::from_str(
+            r#"{
+                "destination_id": 30000142,
+                "destination_name": "Jita",
+                "destination_kind": "solar system"
+            }"#,
+        )
+        .expect("favorite config should deserialize");
+
+        assert!(favorite.nickname.is_empty());
     }
 
     #[test]
@@ -258,6 +277,7 @@ mod tests {
             destination_id: 30000142,
             destination_name: "Jita".to_string(),
             destination_kind: "solar system".to_string(),
+            nickname: "Trade Hub".to_string(),
         });
 
         let removed = config

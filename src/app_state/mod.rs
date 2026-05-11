@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::mpsc::Receiver;
 
 use anyhow::Result;
@@ -35,6 +36,7 @@ pub struct SetDestoApp {
     pub destination: String,
     pub favorite_destination_input: String,
     pub favorites: Vec<FavoriteDestination>,
+    pub favorite_nickname_edits: BTreeMap<i64, String>,
     pub waypoint_route_mode: WaypointRouteMode,
     pub status_message: String,
     pub esi_client_id: String,
@@ -74,12 +76,13 @@ impl SetDestoApp {
         };
         let token_store = KeyringTokenStore;
         let esi_client_id = config.esi.client_id.clone();
-        let favorites = config
+        let favorites: Vec<FavoriteDestination> = config
             .favorites
             .iter()
             .cloned()
             .map(FavoriteDestination::from_config)
             .collect();
+        let favorite_nickname_edits = favorite_nickname_edits(&favorites);
         let characters = config
             .characters
             .iter()
@@ -95,6 +98,7 @@ impl SetDestoApp {
             destination: String::new(),
             favorite_destination_input: String::new(),
             favorites,
+            favorite_nickname_edits,
             waypoint_route_mode: WaypointRouteMode::default(),
             status_message,
             esi_client_id,
@@ -137,10 +141,6 @@ impl SetDestoApp {
         self.last_resolved_destination = None;
     }
 
-    pub fn has_resolved_destination(&self) -> bool {
-        self.last_resolved_destination.is_some()
-    }
-
     pub fn favorite_send_enabled(&self) -> bool {
         !self.waypoint_send_in_progress()
             && !self.characters.is_empty()
@@ -156,6 +156,13 @@ impl SetDestoApp {
             .iter_mut()
             .find(|character| character.character_id == character_id)
     }
+}
+
+pub(super) fn favorite_nickname_edits(favorites: &[FavoriteDestination]) -> BTreeMap<i64, String> {
+    favorites
+        .iter()
+        .map(|favorite| (favorite.destination_id, favorite.nickname.clone()))
+        .collect()
 }
 
 pub(super) fn upsert_character(characters: &mut Vec<CharacterState>, character: CharacterState) {
