@@ -1,6 +1,6 @@
 [package]
 name = "set-desto"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 rust-version = "1.88"
 description = "Desktop utility for setting EVE Online autopilot destinations across authenticated characters."

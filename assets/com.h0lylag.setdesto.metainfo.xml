@@ -10,6 +10,6 @@
   </description>
   <launchable type="desktop-id">com.h0lylag.setdesto.desktop</launchable>
   <releases>
-    <release version="0.0.1" date="2026-05-10"/>
+    <release version="0.0.2" date="2026-05-10"/>
   </releases>
 </component>
