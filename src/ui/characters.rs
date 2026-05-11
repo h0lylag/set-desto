@@ -2,7 +2,10 @@ use eframe::egui;
 
 use crate::app_state::{CharacterSortColumn, SetDestoApp};
 
-const CHARACTER_COLUMN_MAX_WIDTH: f32 = 220.0;
+const CHARACTER_COLUMN_MIN_WIDTH: f32 = 120.0;
+const CHARACTER_COLUMN_MAX_WIDTH: f32 = 420.0;
+const CHARACTER_TABLE_FIXED_WIDTH: f32 = 280.0;
+const CHARACTER_ACTION_BUTTON_WIDTH: f32 = 72.0;
 
 pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
     ui.horizontal(|ui| {
@@ -37,6 +40,7 @@ pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
 
 fn render_character_table(ui: &mut egui::Ui, app: &mut SetDestoApp) {
     let character_ids = app.sorted_character_ids();
+    let character_column_width = character_column_width(ui.available_width());
 
     egui::Grid::new("character_manager_grid")
         .num_columns(4)
@@ -50,7 +54,7 @@ fn render_character_table(ui: &mut egui::Ui, app: &mut SetDestoApp) {
             ui.end_row();
 
             for character_id in character_ids {
-                render_character_row(ui, app, character_id);
+                render_character_row(ui, app, character_id, character_column_width);
             }
         });
 }
@@ -106,7 +110,12 @@ fn render_selection_toolbar(ui: &mut egui::Ui, app: &mut SetDestoApp) {
     });
 }
 
-fn render_character_row(ui: &mut egui::Ui, app: &mut SetDestoApp, character_id: u64) {
+fn render_character_row(
+    ui: &mut egui::Ui,
+    app: &mut SetDestoApp,
+    character_id: u64,
+    character_column_width: f32,
+) {
     let (
         character_id,
         character_name,
@@ -146,7 +155,8 @@ fn render_character_row(ui: &mut egui::Ui, app: &mut SetDestoApp, character_id: 
         .changed();
 
     ui.vertical(|ui| {
-        ui.set_max_width(CHARACTER_COLUMN_MAX_WIDTH);
+        ui.set_min_width(character_column_width);
+        ui.set_max_width(character_column_width);
         ui.add(egui::Label::new(egui::RichText::new(&character_name).strong()).wrap());
         ui.add(egui::Label::new(egui::RichText::new(format!("ID {character_id}")).small()).wrap());
         ui.add(egui::Label::new(egui::RichText::new(token_summary).small()).wrap());
@@ -159,16 +169,28 @@ fn render_character_row(ui: &mut egui::Ui, app: &mut SetDestoApp, character_id: 
     ui.label(format_added_at(added_at_unix_seconds));
 
     if remove_pending {
-        ui.horizontal(|ui| {
-            ui.label("Remove?");
+        ui.vertical(|ui| {
             confirm_clicked = ui
-                .add_enabled(!send_in_progress, egui::Button::new("Confirm"))
+                .add_enabled(
+                    !send_in_progress,
+                    egui::Button::new("Confirm")
+                        .min_size(egui::vec2(CHARACTER_ACTION_BUTTON_WIDTH, 0.0)),
+                )
                 .clicked();
-            cancel_clicked = ui.button("Cancel").clicked();
+            cancel_clicked = ui
+                .add(
+                    egui::Button::new("Cancel")
+                        .min_size(egui::vec2(CHARACTER_ACTION_BUTTON_WIDTH, 0.0)),
+                )
+                .clicked();
         });
     } else {
         remove_clicked = ui
-            .add_enabled(!send_in_progress, egui::Button::new("Remove"))
+            .add_enabled(
+                !send_in_progress,
+                egui::Button::new("Remove")
+                    .min_size(egui::vec2(CHARACTER_ACTION_BUTTON_WIDTH, 0.0)),
+            )
             .clicked();
     }
 
@@ -189,6 +211,11 @@ fn render_character_row(ui: &mut egui::Ui, app: &mut SetDestoApp, character_id: 
     if cancel_clicked {
         app.cancel_remove_character();
     }
+}
+
+fn character_column_width(available_width: f32) -> f32 {
+    (available_width - CHARACTER_TABLE_FIXED_WIDTH)
+        .clamp(CHARACTER_COLUMN_MIN_WIDTH, CHARACTER_COLUMN_MAX_WIDTH)
 }
 
 fn format_added_at(unix_seconds: u64) -> String {
@@ -224,5 +251,12 @@ mod tests {
     fn formats_added_at_dates() {
         assert_eq!(format_added_at(0), "1970-01-01");
         assert_eq!(format_added_at(1_778_371_200), "2026-05-10");
+    }
+
+    #[test]
+    fn character_column_width_scales_with_available_space() {
+        assert_eq!(character_column_width(260.0), CHARACTER_COLUMN_MIN_WIDTH);
+        assert_eq!(character_column_width(500.0), 220.0);
+        assert_eq!(character_column_width(900.0), CHARACTER_COLUMN_MAX_WIDTH);
     }
 }

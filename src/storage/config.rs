@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
 use directories::ProjectDirs;
@@ -113,6 +114,7 @@ pub struct EsiConfig {
 pub struct CharacterConfig {
     pub character_id: u64,
     pub character_name: String,
+    #[serde(default = "default_added_at_unix_seconds")]
     pub added_at_unix_seconds: u64,
     pub scopes: Vec<String>,
     #[serde(default = "default_character_selected")]
@@ -135,6 +137,13 @@ pub fn config_path() -> Result<PathBuf> {
 
 fn default_character_selected() -> bool {
     true
+}
+
+fn default_added_at_unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[cfg(test)]
@@ -180,6 +189,23 @@ mod tests {
         .expect("character config should deserialize");
 
         assert!(character.selected);
+    }
+
+    #[test]
+    fn missing_added_at_defaults_to_current_time() {
+        let before = default_added_at_unix_seconds();
+        let character: CharacterConfig = serde_json::from_str(
+            r#"{
+                "character_id": 42,
+                "character_name": "Test Pilot",
+                "scopes": []
+            }"#,
+        )
+        .expect("character config should deserialize");
+        let after = default_added_at_unix_seconds();
+
+        assert!(character.added_at_unix_seconds >= before);
+        assert!(character.added_at_unix_seconds <= after);
     }
 
     #[test]
