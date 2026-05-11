@@ -137,13 +137,6 @@ impl SetDestoApp {
         self.start_waypoint_send_batch(request, target_ids, skipped, true);
     }
 
-    pub fn clear_destination_form(&mut self) {
-        self.destination.clear();
-        self.waypoint_route_mode = Default::default();
-        self.last_resolved_destination = None;
-        self.status_message = "Cleared form".to_string();
-    }
-
     fn maybe_resolve_structure_with_selected_characters(
         &mut self,
         input: &str,

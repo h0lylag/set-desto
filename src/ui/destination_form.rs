@@ -3,6 +3,10 @@ use eframe::egui;
 use crate::app_state::SetDestoApp;
 use crate::eve::waypoints::WaypointRouteMode;
 
+const DESTINATION_INPUT_MIN_WIDTH: f32 = 160.0;
+const SET_DESTINATION_BUTTON_WIDTH: f32 = 116.0;
+const DESTINATION_ROW_RIGHT_PADDING: f32 = 8.0;
+
 pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
     ui.heading("Set Destination");
 
@@ -84,7 +88,11 @@ fn render_destination_row(ui: &mut egui::Ui, app: &mut SetDestoApp) {
         .show(ui, |ui| {
             ui.label("Destination");
             ui.horizontal(|ui| {
-                let input_width = (ui.available_width() - 180.0).max(160.0);
+                let input_width = (ui.available_width()
+                    - SET_DESTINATION_BUTTON_WIDTH
+                    - ui.spacing().item_spacing.x
+                    - DESTINATION_ROW_RIGHT_PADDING)
+                    .max(DESTINATION_INPUT_MIN_WIDTH);
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut app.destination)
                         .hint_text("System, station, or structure")
@@ -97,16 +105,17 @@ fn render_destination_row(ui: &mut egui::Ui, app: &mut SetDestoApp) {
                 if ui
                     .add_enabled(
                         can_set_destination,
-                        egui::Button::new(set_destination_label),
+                        egui::Button::new(set_destination_label).min_size(egui::vec2(
+                            SET_DESTINATION_BUTTON_WIDTH,
+                            ui.spacing().interact_size.y,
+                        )),
                     )
                     .clicked()
                 {
                     app.set_destination();
                 }
 
-                if ui.button("Clear Form").clicked() {
-                    app.clear_destination_form();
-                }
+                ui.add_space(DESTINATION_ROW_RIGHT_PADDING);
             });
             ui.end_row();
 
