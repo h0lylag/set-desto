@@ -1,5 +1,5 @@
 {
-  description = "Set Desto desktop utility";
+  description = "EVE Online utility for setting autopilot destinations across multiple characters";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";

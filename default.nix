@@ -47,7 +47,7 @@ pkgs.rustPlatform.buildRustPackage rec {
   };
 
   meta = with pkgs.lib; {
-    description = "Set Desto desktop utility";
+    description = "EVE Online utility for setting autopilot destinations across multiple characters.";
     license = licenses.mit;
     platforms = platforms.linux;
     mainProgram = "set-desto";
