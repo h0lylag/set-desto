@@ -20,7 +20,8 @@ pub fn run(debug_mode: bool) -> Result<()> {
     let viewport_builder = egui::ViewportBuilder::default()
         .with_inner_size([DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT])
         .with_min_inner_size([MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT])
-        .with_title(format!("Set Desto - v{}", env!("CARGO_PKG_VERSION")));
+        .with_title(format!("Set Desto - v{}", env!("CARGO_PKG_VERSION")))
+        .with_icon(app_icon()?);
 
     let options = NativeOptions {
         viewport: viewport_builder,
@@ -33,4 +34,9 @@ pub fn run(debug_mode: bool) -> Result<()> {
         Box::new(move |cc| Ok(Box::new(SetDestoApp::new(cc, debug_mode)))),
     )
     .map_err(|err| anyhow!("Failed to launch Set Desto: {err}"))
+}
+
+fn app_icon() -> Result<egui::IconData> {
+    eframe::icon_data::from_png_bytes(include_bytes!("../assets/com.h0lylag.setdesto.png"))
+        .map_err(|err| anyhow!("Failed to load app icon: {err}"))
 }

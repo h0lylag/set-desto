@@ -37,7 +37,8 @@ pkgs.rustPlatform.buildRustPackage rec {
 
   postInstall = ''
     install -Dm644 assets/com.h0lylag.setdesto.desktop $out/share/applications/set-desto.desktop
-    install -Dm644 assets/com.h0lylag.setdesto.svg $out/share/icons/hicolor/scalable/apps/com.h0lylag.setdesto.svg
+    install -Dm644 assets/com.h0lylag.setdesto.png $out/share/icons/hicolor/1024x1024/apps/com.h0lylag.setdesto.png
+    install -Dm644 assets/com.h0lylag.setdesto.png $out/share/pixmaps/com.h0lylag.setdesto.png
     install -Dm644 assets/com.h0lylag.setdesto.metainfo.xml $out/share/metainfo/com.h0lylag.setdesto.metainfo.xml
   '';
 
