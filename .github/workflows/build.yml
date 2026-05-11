@@ -17,7 +17,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [ubuntu-latest, windows-latest]
+        include:
+          - platform: ubuntu-latest
+            artifact_os: linux
+            binary_path: target/release/set-desto
+            binary_name: set-desto
+          - platform: windows-latest
+            artifact_os: windows
+            binary_path: target/release/set-desto.exe
+            binary_name: set-desto.exe
 
     steps:
       - name: checkout
@@ -65,10 +73,28 @@ jobs:
       - name: build release
         run: cargo build --release
 
-      - name: upload release binary
+      - name: read package version
+        id: package
+        shell: pwsh
+        run: |
+          $manifest = Get-Content Cargo.toml -Raw
+          if ($manifest -notmatch '(?m)^version = "([^"]+)"') {
+            throw "Could not find package version in Cargo.toml"
+          }
+          "version=v$($Matches[1])" >> $env:GITHUB_OUTPUT
+
+      - name: stage release artifact
+        shell: pwsh
+        run: |
+          $artifactDir = "dist/set-desto-${{ matrix.artifact_os }}-${{ steps.package.outputs.version }}"
+          New-Item -ItemType Directory -Force $artifactDir | Out-Null
+          Copy-Item "${{ matrix.binary_path }}" "$artifactDir/${{ matrix.binary_name }}"
+          Copy-Item README.md "$artifactDir/README.md"
+          Copy-Item LICENSE "$artifactDir/LICENSE"
+
+      - name: upload release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: set-desto-${{ matrix.platform }}
-          path: |
-            target/release/set-desto
-            target/release/set-desto.exe
+          name: set-desto-${{ matrix.artifact_os }}-${{ steps.package.outputs.version }}
+          path: dist/set-desto-${{ matrix.artifact_os }}-${{ steps.package.outputs.version }}/*
+          if-no-files-found: error
