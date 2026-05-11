@@ -10,6 +10,43 @@ pub struct WaypointOptions {
     pub clear_other_waypoints: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WaypointRouteMode {
+    #[default]
+    ReplaceRoute,
+    AddNextStop,
+    AddFinalStop,
+}
+
+impl WaypointRouteMode {
+    pub const ALL: [Self; 3] = [Self::ReplaceRoute, Self::AddNextStop, Self::AddFinalStop];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ReplaceRoute => "Replace route",
+            Self::AddNextStop => "Add next stop",
+            Self::AddFinalStop => "Add final stop",
+        }
+    }
+
+    pub fn options(self) -> WaypointOptions {
+        match self {
+            Self::ReplaceRoute => WaypointOptions {
+                add_to_beginning: false,
+                clear_other_waypoints: true,
+            },
+            Self::AddNextStop => WaypointOptions {
+                add_to_beginning: true,
+                clear_other_waypoints: false,
+            },
+            Self::AddFinalStop => WaypointOptions {
+                add_to_beginning: false,
+                clear_other_waypoints: false,
+            },
+        }
+    }
+}
+
 pub fn set_waypoint(
     access_token: &str,
     destination_id: i64,

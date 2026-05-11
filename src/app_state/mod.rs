@@ -5,6 +5,7 @@ use eframe::egui;
 use tracing::{error, info};
 
 use crate::eve::sso::{LoginResult, SsoConfig};
+use crate::eve::waypoints::WaypointRouteMode;
 use crate::storage::config::AppConfig;
 use crate::storage::tokens::KeyringTokenStore;
 
@@ -32,7 +33,7 @@ pub struct SetDestoApp {
     pub destination: String,
     pub favorite_destination_input: String,
     pub favorites: Vec<FavoriteDestination>,
-    pub pin_destination: bool,
+    pub waypoint_route_mode: WaypointRouteMode,
     pub status_message: String,
     pub esi_client_id: String,
     last_resolved_destination: Option<ResolvedDestinationDisplay>,
@@ -91,7 +92,7 @@ impl SetDestoApp {
             destination: String::new(),
             favorite_destination_input: String::new(),
             favorites,
-            pin_destination: false,
+            waypoint_route_mode: WaypointRouteMode::default(),
             status_message,
             esi_client_id,
             last_resolved_destination: None,

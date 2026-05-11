@@ -1,6 +1,7 @@
 use eframe::egui;
 
 use crate::app_state::SetDestoApp;
+use crate::eve::waypoints::WaypointRouteMode;
 
 pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
     ui.heading("Set Destination");
@@ -10,9 +11,6 @@ pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
 
     ui.add_space(16.0);
     render_favorite_buttons(ui, app);
-
-    ui.add_space(16.0);
-    render_batch_summary(ui, app);
 }
 
 fn render_destination_controls(ui: &mut egui::Ui, app: &mut SetDestoApp) {
@@ -31,7 +29,13 @@ fn render_control_toolbar(ui: &mut egui::Ui, app: &mut SetDestoApp) {
         ));
 
         ui.separator();
-        ui.checkbox(&mut app.pin_destination, "Pin destination");
+        egui::ComboBox::from_id_salt("waypoint_route_mode")
+            .selected_text(app.waypoint_route_mode.label())
+            .show_ui(ui, |ui| {
+                for mode in WaypointRouteMode::ALL {
+                    ui.selectable_value(&mut app.waypoint_route_mode, mode, mode.label());
+                }
+            });
     });
 }
 
@@ -100,7 +104,7 @@ fn render_destination_row(ui: &mut egui::Ui, app: &mut SetDestoApp) {
                     app.set_destination();
                 }
 
-                if ui.button("Clear").clicked() {
+                if ui.button("Clear Form").clicked() {
                     app.clear_destination_form();
                 }
             });
@@ -112,34 +116,4 @@ fn render_destination_row(ui: &mut egui::Ui, app: &mut SetDestoApp) {
                 ui.end_row();
             }
         });
-}
-
-fn render_batch_summary(ui: &mut egui::Ui, app: &mut SetDestoApp) {
-    let Some(summary) = app.waypoint_batch_summary() else {
-        return;
-    };
-
-    ui.add_space(16.0);
-    ui.separator();
-    ui.add_space(8.0);
-
-    ui.horizontal(|ui| {
-        ui.strong(summary.summary_line());
-
-        if app.can_retry_failed_waypoints() && ui.button("Retry Failed").clicked() {
-            app.retry_failed_waypoints();
-        }
-    });
-
-    if summary.in_progress {
-        ui.add(
-            egui::ProgressBar::new(summary.progress_fraction())
-                .text(summary.progress_text())
-                .desired_width(f32::INFINITY),
-        );
-    }
-
-    if let Some(error) = summary.latest_error {
-        ui.label(format!("Latest error: {error}"));
-    }
 }

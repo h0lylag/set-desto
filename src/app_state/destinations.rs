@@ -4,7 +4,7 @@ use anyhow::{Error, Result, bail};
 use tracing::{debug, info, warn};
 
 use crate::domain::destination;
-use crate::eve::{sso, waypoints::WaypointOptions};
+use crate::eve::sso;
 use crate::storage::tokens::TokenStore;
 
 use super::SetDestoApp;
@@ -111,7 +111,7 @@ impl SetDestoApp {
             .count();
         info!(
             destination = %destination,
-            pinned = self.pin_destination,
+            route_mode = self.waypoint_route_mode.label(),
             destination_id,
             destination_name = %resolved_destination.name,
             destination_kind = %resolved_destination.kind_label,
@@ -121,14 +121,10 @@ impl SetDestoApp {
             "Set Destination requested"
         );
 
-        let options = WaypointOptions {
-            add_to_beginning: self.pin_destination,
-            clear_other_waypoints: !self.pin_destination,
-        };
         let request = WaypointSendRequest {
             destination_name: resolved_destination.name.clone(),
             destination_id,
-            options,
+            options: self.waypoint_route_mode.options(),
         };
         let target_ids: Vec<u64> = self
             .characters
@@ -143,9 +139,9 @@ impl SetDestoApp {
 
     pub fn clear_destination_form(&mut self) {
         self.destination.clear();
-        self.pin_destination = false;
+        self.waypoint_route_mode = Default::default();
         self.last_resolved_destination = None;
-        self.status_message = "Cleared".to_string();
+        self.status_message = "Cleared form".to_string();
     }
 
     fn maybe_resolve_structure_with_selected_characters(
