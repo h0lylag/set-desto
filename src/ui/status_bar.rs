@@ -17,6 +17,7 @@ pub fn render(ctx: &egui::Context, app: &mut SetDestoApp) {
         {
             ui.add(
                 egui::ProgressBar::new(summary.progress_fraction())
+                    .animate(true)
                     .text(summary.progress_text())
                     .desired_width(f32::INFINITY),
             );

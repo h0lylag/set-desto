@@ -16,14 +16,8 @@ const ERROR_LIMIT_PAUSE_THRESHOLD: u64 = 5;
 const RATE_LIMIT_WARN_THRESHOLD: u64 = 10;
 
 static RATE_LIMIT_STATE: OnceLock<Mutex<RateLimitState>> = OnceLock::new();
-static REQUEST_GATE: OnceLock<Mutex<()>> = OnceLock::new();
 
 pub(super) fn send(request: RequestBuilder, operation: &str) -> Result<Response> {
-    // ESI now has both the older global error limit and newer per-route token buckets.
-    // Keep outbound requests serialized so concurrent waypoint workers share one cooldown view.
-    let _request_gate = request_gate()
-        .lock()
-        .expect("ESI request gate mutex poisoned");
     let retry_template = request.try_clone();
     let mut next_request = Some(request);
 
@@ -210,10 +204,6 @@ fn record_cooldown(wait: Duration, reason: &str) {
 
 fn rate_limit_state() -> &'static Mutex<RateLimitState> {
     RATE_LIMIT_STATE.get_or_init(|| Mutex::new(RateLimitState::default()))
-}
-
-fn request_gate() -> &'static Mutex<()> {
-    REQUEST_GATE.get_or_init(|| Mutex::new(()))
 }
 
 fn retry_after_duration(headers: &HeaderMap) -> Option<Duration> {

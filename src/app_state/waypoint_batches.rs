@@ -115,6 +115,7 @@ impl SetDestoApp {
             destination_id: request.destination_id,
             total,
             completed: 0,
+            active: 0,
             successes: 0,
             failures: 0,
             skipped,
@@ -178,6 +179,10 @@ impl SetDestoApp {
                 character_name,
             } => {
                 debug!(character_id, character_name, "Waypoint send started");
+                if let Some(progress) = &mut self.waypoint_send_progress {
+                    progress.active = (progress.active + 1)
+                        .min(progress.total.saturating_sub(progress.completed));
+                }
                 self.status_message = format!("Sending waypoint for {character_name}...");
             }
             WaypointSendEvent::Finished {
@@ -214,6 +219,7 @@ impl SetDestoApp {
                 return;
             };
             progress.completed += 1;
+            progress.active = progress.active.saturating_sub(1);
 
             match &result {
                 Ok(_) => {
@@ -294,6 +300,7 @@ impl SetDestoApp {
             destination_id: request.destination_id,
             total: 0,
             completed: 0,
+            active: 0,
             successes: 0,
             failures: 0,
             skipped: 0,

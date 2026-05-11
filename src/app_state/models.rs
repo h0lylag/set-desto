@@ -208,6 +208,7 @@ pub struct WaypointBatchSummary {
     pub destination_id: i64,
     pub total: usize,
     pub completed: usize,
+    pub active: usize,
     pub successes: usize,
     pub failures: usize,
     pub skipped: usize,
@@ -220,8 +221,13 @@ impl WaypointBatchSummary {
         let destination = format!("{} ({})", self.destination_name, self.destination_id);
 
         if self.in_progress {
+            let active = if self.active > 0 {
+                format!(", {} sending", self.active)
+            } else {
+                String::new()
+            };
             return format!(
-                "{destination} -> {}/{} complete, {} sent, {} failed, {} skipped",
+                "{destination} -> {}/{} complete{active}, {} sent, {} failed, {} skipped",
                 self.completed, self.total, self.successes, self.failures, self.skipped
             );
         }
@@ -234,13 +240,25 @@ impl WaypointBatchSummary {
 
     pub fn progress_fraction(&self) -> f32 {
         if self.total == 0 {
-            return 1.0;
+            return if self.in_progress { 0.0 } else { 1.0 };
         }
 
-        self.completed as f32 / self.total as f32
+        let progress = self.completed as f32 / self.total as f32;
+        if self.in_progress && self.completed >= self.total {
+            return 0.99;
+        }
+
+        progress
     }
 
     pub fn progress_text(&self) -> String {
+        if self.in_progress && self.active > 0 {
+            return format!(
+                "{}/{} done, {} sending",
+                self.completed, self.total, self.active
+            );
+        }
+
         format!("{}/{}", self.completed, self.total)
     }
 
@@ -261,6 +279,7 @@ pub(super) struct WaypointSendProgress {
     pub(super) destination_id: i64,
     pub(super) total: usize,
     pub(super) completed: usize,
+    pub(super) active: usize,
     pub(super) successes: usize,
     pub(super) failures: usize,
     pub(super) skipped: usize,
@@ -274,6 +293,7 @@ impl WaypointSendProgress {
             destination_id: self.destination_id,
             total: self.total,
             completed: self.completed,
+            active: self.active,
             successes: self.successes,
             failures: self.failures,
             skipped: self.skipped,
@@ -284,8 +304,13 @@ impl WaypointSendProgress {
 
     pub(super) fn status_message(&self) -> String {
         let mut status = format!(
-            "Sending {}: {}/{} complete, {} sent, {} failed",
-            self.destination_name, self.completed, self.total, self.successes, self.failures
+            "Sending {}: {}/{} complete, {} sending, {} sent, {} failed",
+            self.destination_name,
+            self.completed,
+            self.total,
+            self.active,
+            self.successes,
+            self.failures
         );
 
         if let Some(error) = &self.latest_error {
@@ -461,4 +486,39 @@ pub(super) fn has_failed_send_result(character: &CharacterState) -> bool {
         character.last_send_result.as_ref(),
         Some(CharacterSendResult::Failed { .. })
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn progress_summary(total: usize, completed: usize, in_progress: bool) -> WaypointBatchSummary {
+        WaypointBatchSummary {
+            destination_name: "Jita".to_string(),
+            destination_id: 30000142,
+            total,
+            completed,
+            active: 0,
+            successes: completed,
+            failures: 0,
+            skipped: 0,
+            in_progress,
+            latest_error: None,
+        }
+    }
+
+    #[test]
+    fn in_progress_empty_batch_starts_at_zero_progress() {
+        assert_eq!(progress_summary(0, 0, true).progress_fraction(), 0.0);
+    }
+
+    #[test]
+    fn in_progress_complete_batch_waits_for_finished_event_before_full_progress() {
+        assert!(progress_summary(3, 3, true).progress_fraction() < 1.0);
+    }
+
+    #[test]
+    fn finished_batch_can_show_full_progress() {
+        assert_eq!(progress_summary(3, 3, false).progress_fraction(), 1.0);
+    }
 }
