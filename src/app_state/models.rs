@@ -1,4 +1,4 @@
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tracing::warn;
 
@@ -24,6 +24,61 @@ impl AppTab {
             Self::Favorites => "Favorites",
             Self::Esi => "ESI",
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CharacterSortColumn {
+    Selected,
+    Name,
+    AddedAt,
+}
+
+impl CharacterSortColumn {
+    pub fn default_ascending(self) -> bool {
+        match self {
+            Self::Selected => false,
+            Self::Name => true,
+            Self::AddedAt => false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CharacterSort {
+    pub column: CharacterSortColumn,
+    pub ascending: bool,
+}
+
+impl CharacterSort {
+    pub fn for_column(column: CharacterSortColumn) -> Self {
+        Self {
+            column,
+            ascending: column.default_ascending(),
+        }
+    }
+
+    pub fn toggle_column(&mut self, column: CharacterSortColumn) {
+        if self.column == column {
+            self.ascending = !self.ascending;
+            return;
+        }
+
+        *self = Self::for_column(column);
+    }
+
+    pub fn marker(self, column: CharacterSortColumn) -> &'static str {
+        if self.column != column {
+            return "";
+        }
+
+        if self.ascending { "^" } else { "v" }
+    }
+}
+
+impl Default for CharacterSort {
+    fn default() -> Self {
+        Self::for_column(CharacterSortColumn::Name)
     }
 }
 
@@ -287,6 +342,7 @@ pub(super) struct AccessTokenUpdate {
 pub struct CharacterState {
     pub character_id: u64,
     pub character_name: String,
+    pub added_at_unix_seconds: u64,
     pub scopes: Vec<String>,
     pub selected: bool,
     pub last_send_result: Option<CharacterSendResult>,
@@ -315,6 +371,7 @@ impl CharacterState {
         Self {
             character_id: character.character_id,
             character_name: character.character_name,
+            added_at_unix_seconds: character.added_at_unix_seconds,
             scopes: character.scopes,
             selected: character.selected,
             last_send_result: None,
@@ -332,6 +389,7 @@ impl CharacterState {
         Self {
             character_id: character.character_id,
             character_name: character.character_name,
+            added_at_unix_seconds: character.added_at_unix_seconds,
             scopes: character.scopes,
             selected: character.selected,
             last_send_result: None,
@@ -383,6 +441,13 @@ impl CharacterState {
 
 pub(super) fn expires_at_from_now(expires_in: u64) -> SystemTime {
     SystemTime::now() + Duration::from_secs(expires_in)
+}
+
+pub(super) fn unix_seconds_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 pub(super) fn has_failed_send_result(character: &CharacterState) -> bool {

@@ -1,11 +1,31 @@
+use std::cmp::Ordering;
+
 use anyhow::{Context, Result, anyhow};
 use tracing::{debug, error, info, warn};
 
 use crate::storage::tokens::TokenStore;
 
-use super::SetDestoApp;
+use super::{CharacterSortColumn, CharacterState, SetDestoApp};
 
 impl SetDestoApp {
+    pub fn set_character_sort_column(&mut self, column: CharacterSortColumn) {
+        self.character_sort.toggle_column(column);
+    }
+
+    pub fn character_sort_marker(&self, column: CharacterSortColumn) -> &'static str {
+        self.character_sort.marker(column)
+    }
+
+    pub fn sorted_character_ids(&self) -> Vec<u64> {
+        let mut characters: Vec<&CharacterState> = self.characters.iter().collect();
+        characters.sort_by(|left, right| self.compare_characters(left, right));
+
+        characters
+            .into_iter()
+            .map(|character| character.character_id)
+            .collect()
+    }
+
     pub fn selected_character_count(&self) -> usize {
         self.characters
             .iter()
@@ -193,5 +213,25 @@ impl SetDestoApp {
             error!(error = ?err, "Failed to save character selection");
             self.status_message = format!("Failed to save character selection: {err}");
         }
+    }
+
+    fn compare_characters(&self, left: &CharacterState, right: &CharacterState) -> Ordering {
+        let ordering = match self.character_sort.column {
+            CharacterSortColumn::Selected => left.selected.cmp(&right.selected),
+            CharacterSortColumn::Name => left.character_name.cmp(&right.character_name),
+            CharacterSortColumn::AddedAt => {
+                left.added_at_unix_seconds.cmp(&right.added_at_unix_seconds)
+            }
+        };
+
+        let ordering = if self.character_sort.ascending {
+            ordering
+        } else {
+            ordering.reverse()
+        };
+
+        ordering
+            .then_with(|| left.character_name.cmp(&right.character_name))
+            .then_with(|| left.character_id.cmp(&right.character_id))
     }
 }

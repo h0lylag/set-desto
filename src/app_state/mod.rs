@@ -19,7 +19,8 @@ mod waypoint_batches;
 mod waypoint_worker;
 
 pub use models::{
-    AppTab, CharacterSendResult, CharacterState, FavoriteDestination, WaypointBatchSummary,
+    AppTab, CharacterSendResult, CharacterSort, CharacterSortColumn, CharacterState,
+    FavoriteDestination, WaypointBatchSummary,
 };
 
 use models::{
@@ -30,6 +31,7 @@ pub struct SetDestoApp {
     pub debug_mode: bool,
     pub active_tab: AppTab,
     pub characters: Vec<CharacterState>,
+    pub character_sort: CharacterSort,
     pub destination: String,
     pub favorite_destination_input: String,
     pub favorites: Vec<FavoriteDestination>,
@@ -89,6 +91,7 @@ impl SetDestoApp {
             debug_mode,
             active_tab: AppTab::Destination,
             characters,
+            character_sort: CharacterSort::default(),
             destination: String::new(),
             favorite_destination_input: String::new(),
             favorites,

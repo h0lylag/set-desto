@@ -5,7 +5,7 @@ use crate::eve::sso::{self, AuthenticatedCharacter};
 use crate::storage::config::CharacterConfig;
 use crate::storage::tokens::TokenStore;
 
-use super::models::{CharacterState, expires_at_from_now};
+use super::models::{CharacterState, expires_at_from_now, unix_seconds_now};
 use super::{SetDestoApp, upsert_character};
 
 impl SetDestoApp {
@@ -77,9 +77,16 @@ impl SetDestoApp {
             .find(|existing| existing.character_id == character.character_id)
             .map(|existing| existing.selected)
             .unwrap_or(true);
+        let added_at_unix_seconds = self
+            .characters
+            .iter()
+            .find(|existing| existing.character_id == character.character_id)
+            .map(|existing| existing.added_at_unix_seconds)
+            .unwrap_or_else(unix_seconds_now);
         let character_config = CharacterConfig {
             character_id: character.character_id,
             character_name: character.character_name.clone(),
+            added_at_unix_seconds,
             scopes: character.scopes.clone(),
             selected,
         };

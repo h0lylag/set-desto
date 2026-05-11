@@ -113,6 +113,7 @@ pub struct EsiConfig {
 pub struct CharacterConfig {
     pub character_id: u64,
     pub character_name: String,
+    pub added_at_unix_seconds: u64,
     pub scopes: Vec<String>,
     #[serde(default = "default_character_selected")]
     pub selected: bool,
@@ -146,6 +147,7 @@ mod tests {
         config.upsert_character(CharacterConfig {
             character_id: 42,
             character_name: "Old Name".to_string(),
+            added_at_unix_seconds: 1_778_000_000,
             scopes: vec!["old.scope".to_string()],
             selected: true,
         });
@@ -153,12 +155,14 @@ mod tests {
         config.upsert_character(CharacterConfig {
             character_id: 42,
             character_name: "New Name".to_string(),
+            added_at_unix_seconds: 1_778_000_001,
             scopes: vec!["new.scope".to_string()],
             selected: false,
         });
 
         assert_eq!(config.characters.len(), 1);
         assert_eq!(config.characters[0].character_name, "New Name");
+        assert_eq!(config.characters[0].added_at_unix_seconds, 1_778_000_001);
         assert_eq!(config.characters[0].scopes, vec!["new.scope"]);
         assert!(!config.characters[0].selected);
     }
@@ -169,6 +173,7 @@ mod tests {
             r#"{
                 "character_id": 42,
                 "character_name": "Test Pilot",
+                "added_at_unix_seconds": 1778000000,
                 "scopes": []
             }"#,
         )
@@ -244,6 +249,7 @@ mod tests {
         config.upsert_character(CharacterConfig {
             character_id: 42,
             character_name: "Test Pilot".to_string(),
+            added_at_unix_seconds: 1_778_000_000,
             scopes: Vec::new(),
             selected: true,
         });
