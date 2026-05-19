@@ -12,6 +12,7 @@ mod status_bar;
 
 pub fn render(ctx: &egui::Context, app: &mut SetDestoApp) {
     app.poll_character_login();
+    app.poll_sde_cache();
     app.poll_waypoint_send();
     header::render(ctx, app);
     main_panel::render(ctx, app);

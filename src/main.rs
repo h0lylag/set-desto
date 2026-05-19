@@ -7,8 +7,10 @@ mod app_state;
 mod cli;
 mod domain;
 mod eve;
+mod fobscout;
 mod logging;
 mod platform;
+mod sde;
 mod storage;
 mod ui;
 

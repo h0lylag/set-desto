@@ -6,11 +6,12 @@ use anyhow::{Result, anyhow, bail};
 use tracing::{debug, error, info};
 
 use crate::app_constants::MAX_CONCURRENT_WAYPOINT_SENDS;
-use crate::eve::{sso, waypoints};
+use crate::eve::{location, sso, waypoints};
 use crate::storage::tokens::TokenStore;
 
 use super::models::{
-    AccessTokenUpdate, WaypointSendEvent, WaypointSendJob, WaypointSendSuccess, expires_at_from_now,
+    AccessTokenUpdate, WaypointSendEvent, WaypointSendJob, WaypointSendRequestKind,
+    WaypointSendSuccess, expires_at_from_now,
 };
 
 const ACCESS_TOKEN_REFRESH_BUFFER: Duration = Duration::from_secs(60);
@@ -59,7 +60,26 @@ pub(super) fn start_waypoint_send(jobs: Vec<WaypointSendJob>, sender: Sender<Way
 
 fn run_waypoint_send_job(job: &WaypointSendJob) -> Result<WaypointSendSuccess> {
     let (access_token, access_token_update) = access_token_for_job(job)?;
-    waypoints::set_waypoint(&access_token, job.destination_id, job.options)?;
+
+    match &job.kind {
+        WaypointSendRequestKind::Single { options } => {
+            waypoints::set_waypoint(&access_token, job.destination_id, *options)?;
+        }
+        WaypointSendRequestKind::OptimizedRoute {
+            destinations,
+            graph,
+        } => {
+            let origin = location::current_solar_system_id(&access_token, job.character_id)?;
+            let route = graph.optimize_open_route(origin, destinations)?;
+            for (index, destination) in route.destinations.iter().enumerate() {
+                waypoints::set_waypoint(
+                    &access_token,
+                    destination.system_id,
+                    waypoints::options_for_route_stop(index == 0),
+                )?;
+            }
+        }
+    }
 
     Ok(WaypointSendSuccess {
         access_token_update,

@@ -137,6 +137,13 @@ pub fn config_path() -> Result<PathBuf> {
     Ok(project_dirs.config_dir().join(CONFIG_FILE))
 }
 
+pub fn cache_dir() -> Result<PathBuf> {
+    let project_dirs = ProjectDirs::from("com", "h0lylag", "set-desto")
+        .ok_or_else(|| anyhow!("Could not determine platform cache directory"))?;
+
+    Ok(project_dirs.cache_dir().to_path_buf())
+}
+
 fn default_character_selected() -> bool {
     true
 }

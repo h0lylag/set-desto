@@ -22,5 +22,13 @@ pub fn render(ctx: &egui::Context, app: &mut SetDestoApp) {
                     .desired_width(f32::INFINITY),
             );
         }
+
+        ui.separator();
+        ui.horizontal(|ui| {
+            if app.sde_cache_in_progress() {
+                ui.add(egui::Spinner::new().size(14.0));
+            }
+            ui.label(format!("SDE: {}", app.sde_cache_status));
+        });
     });
 }

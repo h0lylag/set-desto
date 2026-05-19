@@ -43,8 +43,8 @@ impl SetDestoApp {
             .filter(|character| {
                 matches!(
                     character.last_send_result.as_ref(),
-                    Some(CharacterSendResult::Failed { destination_id, .. })
-                        if *destination_id == request.destination_id
+                    Some(CharacterSendResult::Failed { destination_name, destination_id, .. })
+                        if request.matches_send_result(destination_name, *destination_id)
                 )
             })
             .map(|character| character.character_id)
@@ -124,8 +124,8 @@ impl SetDestoApp {
         self.last_waypoint_batch = None;
         self.last_waypoint_request = Some(request.clone());
         self.status_message = format!(
-            "Sending {} ({}) to {total} characters...",
-            request.destination_name, request.destination_id
+            "Sending {} to {total} characters...",
+            request.destination_summary()
         );
     }
 
@@ -165,7 +165,7 @@ impl SetDestoApp {
                 expires_at: character.expires_at,
                 destination_name: request.destination_name.clone(),
                 destination_id: request.destination_id,
-                options: request.options,
+                kind: request.kind.clone(),
                 token_store: self.token_store,
                 sso_config: sso_config.clone(),
             })
@@ -310,21 +310,25 @@ impl SetDestoApp {
 
         for character in &self.characters {
             match character.last_send_result.as_ref() {
-                Some(CharacterSendResult::Pending { destination_id, .. })
-                    if *destination_id == request.destination_id =>
-                {
+                Some(CharacterSendResult::Pending {
+                    destination_name,
+                    destination_id,
+                }) if request.matches_send_result(destination_name, *destination_id) => {
                     summary.total += 1;
                 }
-                Some(CharacterSendResult::Sent { destination_id, .. })
-                    if *destination_id == request.destination_id =>
-                {
+                Some(CharacterSendResult::Sent {
+                    destination_name,
+                    destination_id,
+                }) if request.matches_send_result(destination_name, *destination_id) => {
                     summary.total += 1;
                     summary.completed += 1;
                     summary.successes += 1;
                 }
-                Some(CharacterSendResult::Failed { destination_id, .. })
-                    if *destination_id == request.destination_id =>
-                {
+                Some(CharacterSendResult::Failed {
+                    destination_name,
+                    destination_id,
+                    ..
+                }) if request.matches_send_result(destination_name, *destination_id) => {
                     summary.total += 1;
                     summary.completed += 1;
                     summary.failures += 1;

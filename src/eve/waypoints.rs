@@ -47,6 +47,13 @@ impl WaypointRouteMode {
     }
 }
 
+pub fn options_for_route_stop(first_stop: bool) -> WaypointOptions {
+    WaypointOptions {
+        add_to_beginning: false,
+        clear_other_waypoints: first_stop,
+    }
+}
+
 pub fn set_waypoint(
     access_token: &str,
     destination_id: i64,
@@ -80,4 +87,25 @@ pub fn set_waypoint(
 
     info!(destination_id, "ESI waypoint request accepted");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_route_stop_replaces_existing_route() {
+        let options = options_for_route_stop(true);
+
+        assert!(!options.add_to_beginning);
+        assert!(options.clear_other_waypoints);
+    }
+
+    #[test]
+    fn later_route_stops_append_to_route() {
+        let options = options_for_route_stop(false);
+
+        assert!(!options.add_to_beginning);
+        assert!(!options.clear_other_waypoints);
+    }
 }

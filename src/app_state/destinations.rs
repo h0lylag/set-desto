@@ -121,11 +121,11 @@ impl SetDestoApp {
             "Set Destination requested"
         );
 
-        let request = WaypointSendRequest {
-            destination_name: resolved_destination.name.clone(),
+        let request = WaypointSendRequest::single(
+            resolved_destination.name.clone(),
             destination_id,
-            options: self.waypoint_route_mode.options(),
-        };
+            self.waypoint_route_mode.options(),
+        );
         let target_ids: Vec<u64> = self
             .characters
             .iter()

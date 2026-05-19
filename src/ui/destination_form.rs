@@ -6,12 +6,15 @@ use crate::eve::waypoints::WaypointRouteMode;
 const DESTINATION_INPUT_MIN_WIDTH: f32 = 160.0;
 const SET_DESTINATION_BUTTON_WIDTH: f32 = 116.0;
 const DESTINATION_ROW_RIGHT_PADDING: f32 = 8.0;
+const IMPORT_MODAL_WIDTH: f32 = 760.0;
+const IMPORT_MODAL_HEIGHT: f32 = 560.0;
 
 pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
     ui.heading("Set Destination");
 
     ui.add_space(12.0);
     render_destination_controls(ui, app);
+    render_import_modal(ui.ctx(), app);
 
     ui.add_space(16.0);
     render_favorite_buttons(ui, app);
@@ -40,6 +43,17 @@ fn render_control_toolbar(ui: &mut egui::Ui, app: &mut SetDestoApp) {
                     ui.selectable_value(&mut app.waypoint_route_mode, mode, mode.label());
                 }
             });
+
+        ui.separator();
+        if ui
+            .add_enabled(
+                !app.waypoint_send_in_progress(),
+                egui::Button::new("Import"),
+            )
+            .clicked()
+        {
+            app.open_fob_import();
+        }
     });
 }
 
@@ -124,5 +138,134 @@ fn render_destination_row(ui: &mut egui::Ui, app: &mut SetDestoApp) {
                 ui.label(format!("Resolved: {resolved_destination}"));
                 ui.end_row();
             }
+        });
+}
+
+fn render_import_modal(ctx: &egui::Context, app: &mut SetDestoApp) {
+    if !app.fob_import_open {
+        return;
+    }
+
+    let mut open = app.fob_import_open;
+    egui::Window::new("Import FOBScout Export")
+        .id(egui::Id::new("fobscout_import_modal"))
+        .collapsible(false)
+        .resizable(true)
+        .default_width(IMPORT_MODAL_WIDTH)
+        .default_height(IMPORT_MODAL_HEIGHT)
+        .open(&mut open)
+        .show(ctx, |ui| {
+            ui.label(&app.sde_cache_status);
+            ui.add_space(8.0);
+
+            let mut import_text = app.fob_import_text.clone();
+            let response = ui.add(
+                egui::TextEdit::multiline(&mut import_text)
+                    .hint_text("Paste FOBScout export")
+                    .desired_rows(9)
+                    .desired_width(f32::INFINITY),
+            );
+            if response.changed() {
+                app.set_fob_import_text(import_text);
+            }
+
+            ui.add_space(8.0);
+            render_import_messages(ui, app);
+
+            ui.horizontal(|ui| {
+                ui.label(format!(
+                    "{} valid, {} selected",
+                    app.valid_fob_import_count(),
+                    app.selected_fob_import_count()
+                ));
+                if app.selected_fob_import_count() > crate::sde::MAX_OPTIMIZED_ROUTE_STOPS {
+                    ui.colored_label(
+                        ui.visuals().warn_fg_color,
+                        format!(
+                            "Select {} or fewer systems",
+                            crate::sde::MAX_OPTIMIZED_ROUTE_STOPS
+                        ),
+                    );
+                }
+            });
+
+            ui.add_space(6.0);
+            render_import_table(ui, app);
+
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                let route_button = ui.add_enabled(
+                    app.can_set_imported_fob_route(),
+                    egui::Button::new("Set Optimized Route"),
+                );
+                if route_button.clicked() {
+                    app.set_imported_fob_route();
+                }
+
+                if ui.button("Close").clicked() {
+                    app.close_fob_import();
+                }
+            });
+        });
+
+    if app.fob_import_open {
+        app.fob_import_open = open;
+    }
+}
+
+fn render_import_messages(ui: &mut egui::Ui, app: &SetDestoApp) {
+    for message in &app.fob_import_messages {
+        ui.colored_label(ui.visuals().warn_fg_color, message);
+    }
+
+    if app.fob_import_rows.is_empty() && app.fob_import_text.trim().is_empty() {
+        ui.label("Paste a FOBScout export to preview systems.");
+    }
+}
+
+fn render_import_table(ui: &mut egui::Ui, app: &mut SetDestoApp) {
+    let rows = app.fob_import_rows.clone();
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .max_height(240.0)
+        .show(ui, |ui| {
+            egui::Grid::new("fobscout_import_grid")
+                .num_columns(5)
+                .spacing([12.0, 6.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.strong("Use");
+                    ui.strong("System");
+                    ui.strong("Region");
+                    ui.strong("Last Seen UTC");
+                    ui.strong("Claimed By");
+                    ui.end_row();
+
+                    for row in rows {
+                        let mut selected = row.selected;
+                        let changed = ui
+                            .add_enabled(row.valid(), egui::Checkbox::new(&mut selected, ""))
+                            .changed();
+
+                        ui.vertical(|ui| {
+                            ui.label(row.display_system());
+                            if let Some(error) = &row.error {
+                                ui.colored_label(ui.visuals().error_fg_color, error);
+                            } else if row.resolved_system_name.as_deref()
+                                != Some(row.input_system.as_str())
+                            {
+                                ui.small(format!("Imported as {}", row.input_system));
+                            }
+                        });
+                        ui.label(row.region);
+                        ui.label(row.last_seen_utc);
+                        ui.label(row.claimed_by);
+                        ui.end_row();
+
+                        if changed {
+                            app.set_fob_import_selected(row.import_index, selected);
+                        }
+                    }
+                });
         });
 }

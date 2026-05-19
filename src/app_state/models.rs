@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tracing::warn;
@@ -5,6 +6,7 @@ use tracing::warn;
 use crate::domain::destination;
 use crate::eve::sso::SsoConfig;
 use crate::eve::waypoints::WaypointOptions;
+use crate::sde::{RouteDestination, RouteGraph};
 use crate::storage::config::{CharacterConfig, FavoriteDestinationConfig};
 use crate::storage::tokens::{KeyringTokenStore, TokenStore};
 
@@ -108,18 +110,29 @@ impl CharacterSendResult {
             Self::Pending {
                 destination_name,
                 destination_id,
-            } => format!("Pending: {destination_name} ({destination_id})"),
+            } => pending_summary("Pending", destination_name, *destination_id),
             Self::Sent {
                 destination_name,
                 destination_id,
-            } => format!("Sent: {destination_name} ({destination_id})"),
+            } => pending_summary("Sent", destination_name, *destination_id),
             Self::Failed {
                 destination_name,
                 destination_id,
                 error,
-            } => format!("Failed: {destination_name} ({destination_id}) - {error}"),
+            } => format!(
+                "{} - {error}",
+                pending_summary("Failed", destination_name, *destination_id)
+            ),
             Self::Skipped { reason } => format!("Skipped: {reason}"),
         }
+    }
+}
+
+fn pending_summary(prefix: &str, destination_name: &str, destination_id: i64) -> String {
+    if destination_id > 0 {
+        format!("{prefix}: {destination_name} ({destination_id})")
+    } else {
+        format!("{prefix}: {destination_name}")
     }
 }
 
@@ -162,6 +175,31 @@ pub struct FavoriteDestination {
     pub destination_name: String,
     pub destination_kind: String,
     pub nickname: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct FobImportSystem {
+    pub import_index: usize,
+    pub input_system: String,
+    pub resolved_system_id: Option<i64>,
+    pub resolved_system_name: Option<String>,
+    pub region: String,
+    pub last_seen_utc: String,
+    pub claimed_by: String,
+    pub selected: bool,
+    pub error: Option<String>,
+}
+
+impl FobImportSystem {
+    pub fn display_system(&self) -> &str {
+        self.resolved_system_name
+            .as_deref()
+            .unwrap_or(&self.input_system)
+    }
+
+    pub fn valid(&self) -> bool {
+        self.resolved_system_id.is_some() && self.error.is_none()
+    }
 }
 
 impl FavoriteDestination {
@@ -218,7 +256,11 @@ pub struct WaypointBatchSummary {
 
 impl WaypointBatchSummary {
     pub fn summary_line(&self) -> String {
-        let destination = format!("{} ({})", self.destination_name, self.destination_id);
+        let destination = if self.destination_id > 0 {
+            format!("{} ({})", self.destination_name, self.destination_id)
+        } else {
+            self.destination_name.clone()
+        };
 
         if self.in_progress {
             let active = if self.active > 0 {
@@ -252,6 +294,10 @@ impl WaypointBatchSummary {
     }
 
     pub fn progress_text(&self) -> String {
+        if self.destination_id == 0 {
+            return format!("{}/{} characters", self.completed, self.total);
+        }
+
         if self.in_progress && self.active > 0 {
             return format!(
                 "{}/{} done, {} sending",
@@ -325,7 +371,58 @@ impl WaypointSendProgress {
 pub(super) struct WaypointSendRequest {
     pub(super) destination_name: String,
     pub(super) destination_id: i64,
-    pub(super) options: WaypointOptions,
+    pub(super) kind: WaypointSendRequestKind,
+}
+
+impl WaypointSendRequest {
+    pub(super) fn single(
+        destination_name: String,
+        destination_id: i64,
+        options: WaypointOptions,
+    ) -> Self {
+        Self {
+            destination_name,
+            destination_id,
+            kind: WaypointSendRequestKind::Single { options },
+        }
+    }
+
+    pub(super) fn optimized_route(
+        destinations: Vec<RouteDestination>,
+        graph: Arc<RouteGraph>,
+    ) -> Self {
+        Self {
+            destination_name: format!("Optimized FOB route ({} stops)", destinations.len()),
+            destination_id: 0,
+            kind: WaypointSendRequestKind::OptimizedRoute {
+                destinations,
+                graph,
+            },
+        }
+    }
+
+    pub(super) fn destination_summary(&self) -> String {
+        if self.destination_id > 0 {
+            format!("{} ({})", self.destination_name, self.destination_id)
+        } else {
+            self.destination_name.clone()
+        }
+    }
+
+    pub(super) fn matches_send_result(&self, destination_name: &str, destination_id: i64) -> bool {
+        self.destination_id == destination_id && self.destination_name == destination_name
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum WaypointSendRequestKind {
+    Single {
+        options: WaypointOptions,
+    },
+    OptimizedRoute {
+        destinations: Vec<RouteDestination>,
+        graph: Arc<RouteGraph>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -336,7 +433,7 @@ pub(super) struct WaypointSendJob {
     pub(super) expires_at: Option<SystemTime>,
     pub(super) destination_name: String,
     pub(super) destination_id: i64,
-    pub(super) options: WaypointOptions,
+    pub(super) kind: WaypointSendRequestKind,
     pub(super) token_store: KeyringTokenStore,
     pub(super) sso_config: SsoConfig,
 }
