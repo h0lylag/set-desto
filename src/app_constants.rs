@@ -1,5 +1,5 @@
-pub const DEFAULT_WINDOW_WIDTH: f32 = 550.0;
-pub const DEFAULT_WINDOW_HEIGHT: f32 = 450.0;
+pub const DEFAULT_WINDOW_WIDTH: f32 = 728.0;
+pub const DEFAULT_WINDOW_HEIGHT: f32 = 596.0;
 pub const MIN_WINDOW_WIDTH: f32 = 450.0;
 pub const MIN_WINDOW_HEIGHT: f32 = 320.0;
 pub const REPAINT_INTERVAL_MS: u64 = 250;

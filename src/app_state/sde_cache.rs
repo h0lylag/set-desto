@@ -30,10 +30,10 @@ impl SetDestoApp {
                     "SDE route cache ready"
                 );
                 self.sde_cache_status = format!(
-                    "{}: build {}, {} systems",
+                    "{} · build {}, {} systems",
                     message,
                     graph.build_number(),
-                    graph.system_count()
+                    format_system_count(graph.system_count())
                 );
                 self.sde_route_graph = Some(graph);
                 self.sde_cache_receiver = None;
@@ -42,11 +42,10 @@ impl SetDestoApp {
             Ok(SdeCacheEvent::Failed { error }) => {
                 if self.sde_route_graph.is_some() {
                     warn!(error, "SDE route cache refresh failed; using cached graph");
-                    self.sde_cache_status =
-                        format!("SDE refresh failed; using cached route graph: {error}");
+                    self.sde_cache_status = format!("using cached map; update failed: {error}");
                 } else {
                     error!(error, "SDE route cache unavailable");
-                    self.sde_cache_status = format!("SDE route graph unavailable: {error}");
+                    self.sde_cache_status = format!("unavailable: {error}");
                 }
                 self.sde_cache_receiver = None;
                 self.refresh_fob_import_preview();
@@ -54,10 +53,9 @@ impl SetDestoApp {
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => {
                 if self.sde_route_graph.is_some() {
-                    self.sde_cache_status =
-                        "SDE refresh worker stopped; using cached route graph".to_string();
+                    self.sde_cache_status = "using cached map; updater stopped".to_string();
                 } else {
-                    self.sde_cache_status = "SDE refresh worker stopped".to_string();
+                    self.sde_cache_status = "updater stopped".to_string();
                 }
                 self.sde_cache_receiver = None;
             }
@@ -71,4 +69,18 @@ impl SetDestoApp {
     pub fn sde_cache_in_progress(&self) -> bool {
         self.sde_cache_receiver.is_some()
     }
+}
+
+fn format_system_count(count: usize) -> String {
+    let digits = count.to_string();
+    let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
+
+    for (index, character) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            formatted.push(',');
+        }
+        formatted.push(character);
+    }
+
+    formatted
 }

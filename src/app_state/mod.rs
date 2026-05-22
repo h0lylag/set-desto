@@ -25,7 +25,7 @@ mod waypoint_worker;
 
 pub use models::{
     AppTab, CharacterSendResult, CharacterSort, CharacterSortColumn, CharacterState,
-    FavoriteDestination, FobImportSystem, WaypointBatchSummary,
+    FavoriteDestination, FobImportSortColumn, FobImportSystem, WaypointBatchSummary,
 };
 
 use models::{
@@ -49,6 +49,8 @@ pub struct SetDestoApp {
     pub fob_import_text: String,
     pub fob_import_rows: Vec<FobImportSystem>,
     pub fob_import_messages: Vec<String>,
+    pub fob_import_sort_column: FobImportSortColumn,
+    pub fob_import_sort_ascending: bool,
     pub sde_route_graph: Option<Arc<RouteGraph>>,
     last_resolved_destination: Option<ResolvedDestinationDisplay>,
     pub pending_remove_character_id: Option<u64>,
@@ -89,12 +91,9 @@ impl SetDestoApp {
         let (sde_route_graph, sde_cache_status) = match crate::sde::load_cached_graph() {
             Ok(graph) => (
                 Some(graph),
-                "Loaded cached SDE route graph; checking for updates...".to_string(),
+                "loaded cached map; checking for updates".to_string(),
             ),
-            Err(_) => (
-                None,
-                "Downloading SDE route graph in the background...".to_string(),
-            ),
+            Err(_) => (None, "downloading route map".to_string()),
         };
         let sde_cache_receiver = Some(crate::sde::start_cache_refresh(
             sde_route_graph.as_ref().map(|graph| graph.build_number()),
@@ -131,6 +130,8 @@ impl SetDestoApp {
             fob_import_text: String::new(),
             fob_import_rows: Vec::new(),
             fob_import_messages: Vec::new(),
+            fob_import_sort_column: FobImportSortColumn::System,
+            fob_import_sort_ascending: true,
             sde_route_graph,
             last_resolved_destination: None,
             pending_remove_character_id: None,

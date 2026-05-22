@@ -190,6 +190,27 @@ pub struct FobImportSystem {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FobImportSortColumn {
+    Use,
+    System,
+    Region,
+    LastSeenUtc,
+    ClaimedBy,
+}
+
+impl FobImportSortColumn {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Use => "Use",
+            Self::System => "System",
+            Self::Region => "Region",
+            Self::LastSeenUtc => "Last Seen UTC",
+            Self::ClaimedBy => "Claimed By",
+        }
+    }
+}
+
 impl FobImportSystem {
     pub fn display_system(&self) -> &str {
         self.resolved_system_name

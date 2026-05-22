@@ -1,13 +1,16 @@
 use eframe::egui;
 
-use crate::app_state::SetDestoApp;
+use crate::app_state::{FobImportSortColumn, SetDestoApp};
 use crate::eve::waypoints::WaypointRouteMode;
 
 const DESTINATION_INPUT_MIN_WIDTH: f32 = 160.0;
 const SET_DESTINATION_BUTTON_WIDTH: f32 = 116.0;
 const DESTINATION_ROW_RIGHT_PADDING: f32 = 8.0;
-const IMPORT_MODAL_WIDTH: f32 = 760.0;
-const IMPORT_MODAL_HEIGHT: f32 = 560.0;
+const IMPORT_MODAL_HORIZONTAL_MARGIN: f32 = 32.0;
+const IMPORT_MODAL_VERTICAL_MARGIN: f32 = 32.0;
+const IMPORT_MODAL_MIN_WIDTH: f32 = 560.0;
+const IMPORT_MODAL_MIN_HEIGHT: f32 = 420.0;
+const IMPORT_PASTE_TARGET_HEIGHT: f32 = 48.0;
 
 pub fn render(ui: &mut egui::Ui, app: &mut SetDestoApp) {
     ui.heading("Set Destination");
@@ -146,29 +149,28 @@ fn render_import_modal(ctx: &egui::Context, app: &mut SetDestoApp) {
         return;
     }
 
+    handle_import_paste(ctx, app);
+
     let mut open = app.fob_import_open;
+    let content_rect = ctx.content_rect();
+    let modal_size = egui::vec2(
+        (content_rect.width() - IMPORT_MODAL_HORIZONTAL_MARGIN * 2.0).max(IMPORT_MODAL_MIN_WIDTH),
+        (content_rect.height() - IMPORT_MODAL_VERTICAL_MARGIN * 2.0).max(IMPORT_MODAL_MIN_HEIGHT),
+    );
     egui::Window::new("Import FOBScout Export")
         .id(egui::Id::new("fobscout_import_modal"))
         .collapsible(false)
         .resizable(true)
-        .default_width(IMPORT_MODAL_WIDTH)
-        .default_height(IMPORT_MODAL_HEIGHT)
+        .default_width(modal_size.x)
+        .default_height(modal_size.y)
+        .default_pos(content_rect.center())
+        .pivot(egui::Align2::CENTER_CENTER)
         .open(&mut open)
         .show(ctx, |ui| {
             ui.label(&app.sde_cache_status);
             ui.add_space(8.0);
 
-            let mut import_text = app.fob_import_text.clone();
-            let response = ui.add(
-                egui::TextEdit::multiline(&mut import_text)
-                    .hint_text("Paste FOBScout export")
-                    .desired_rows(9)
-                    .desired_width(f32::INFINITY),
-            );
-            if response.changed() {
-                app.set_fob_import_text(import_text);
-            }
-
+            render_import_paste_target(ui, app);
             ui.add_space(8.0);
             render_import_messages(ui, app);
 
@@ -202,6 +204,16 @@ fn render_import_modal(ctx: &egui::Context, app: &mut SetDestoApp) {
                     app.set_imported_fob_route();
                 }
 
+                if ui
+                    .add_enabled(
+                        !app.fob_import_text.trim().is_empty(),
+                        egui::Button::new("Clear"),
+                    )
+                    .clicked()
+                {
+                    app.set_fob_import_text(String::new());
+                }
+
                 if ui.button("Close").clicked() {
                     app.close_fob_import();
                 }
@@ -213,19 +225,49 @@ fn render_import_modal(ctx: &egui::Context, app: &mut SetDestoApp) {
     }
 }
 
+fn handle_import_paste(ctx: &egui::Context, app: &mut SetDestoApp) {
+    let pasted = ctx.input(|input| {
+        input
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                egui::Event::Paste(text) if !text.trim().is_empty() => Some(text.clone()),
+                _ => None,
+            })
+            .next_back()
+    });
+
+    if let Some(text) = pasted {
+        app.set_fob_import_text(text);
+    }
+}
+
+fn render_import_paste_target(ui: &mut egui::Ui, app: &SetDestoApp) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.set_min_height(IMPORT_PASTE_TARGET_HEIGHT);
+        ui.vertical_centered(|ui| {
+            ui.add_space(7.0);
+            if app.fob_import_text.trim().is_empty() {
+                single_line_label(ui, egui::RichText::new("Paste FOBScout export").strong());
+            } else {
+                single_line_label(ui, egui::RichText::new("FOBScout export loaded").strong());
+            }
+        });
+    });
+}
+
 fn render_import_messages(ui: &mut egui::Ui, app: &SetDestoApp) {
     for message in &app.fob_import_messages {
-        ui.colored_label(ui.visuals().warn_fg_color, message);
-    }
-
-    if app.fob_import_rows.is_empty() && app.fob_import_text.trim().is_empty() {
-        ui.label("Paste a FOBScout export to preview systems.");
+        ui.add(
+            egui::Label::new(egui::RichText::new(message).color(ui.visuals().warn_fg_color))
+                .extend(),
+        );
     }
 }
 
 fn render_import_table(ui: &mut egui::Ui, app: &mut SetDestoApp) {
-    let rows = app.fob_import_rows.clone();
-    egui::ScrollArea::vertical()
+    let rows = app.sorted_fob_import_rows();
+    egui::ScrollArea::both()
         .auto_shrink([false, false])
         .max_height(240.0)
         .show(ui, |ui| {
@@ -234,11 +276,11 @@ fn render_import_table(ui: &mut egui::Ui, app: &mut SetDestoApp) {
                 .spacing([12.0, 6.0])
                 .striped(true)
                 .show(ui, |ui| {
-                    ui.strong("Use");
-                    ui.strong("System");
-                    ui.strong("Region");
-                    ui.strong("Last Seen UTC");
-                    ui.strong("Claimed By");
+                    sort_header(ui, app, FobImportSortColumn::Use);
+                    sort_header(ui, app, FobImportSortColumn::System);
+                    sort_header(ui, app, FobImportSortColumn::Region);
+                    sort_header(ui, app, FobImportSortColumn::LastSeenUtc);
+                    sort_header(ui, app, FobImportSortColumn::ClaimedBy);
                     ui.end_row();
 
                     for row in rows {
@@ -248,18 +290,31 @@ fn render_import_table(ui: &mut egui::Ui, app: &mut SetDestoApp) {
                             .changed();
 
                         ui.vertical(|ui| {
-                            ui.label(row.display_system());
+                            single_line_label(ui, row.display_system());
                             if let Some(error) = &row.error {
-                                ui.colored_label(ui.visuals().error_fg_color, error);
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(error)
+                                            .color(ui.visuals().error_fg_color),
+                                    )
+                                    .extend(),
+                                );
                             } else if row.resolved_system_name.as_deref()
                                 != Some(row.input_system.as_str())
                             {
-                                ui.small(format!("Imported as {}", row.input_system));
+                                single_line_label(
+                                    ui,
+                                    egui::RichText::new(format!(
+                                        "Imported as {}",
+                                        row.input_system
+                                    ))
+                                    .small(),
+                                );
                             }
                         });
-                        ui.label(row.region);
-                        ui.label(row.last_seen_utc);
-                        ui.label(row.claimed_by);
+                        single_line_label(ui, row.region);
+                        single_line_label(ui, row.last_seen_utc);
+                        single_line_label(ui, row.claimed_by);
                         ui.end_row();
 
                         if changed {
@@ -268,4 +323,27 @@ fn render_import_table(ui: &mut egui::Ui, app: &mut SetDestoApp) {
                     }
                 });
         });
+}
+
+fn sort_header(ui: &mut egui::Ui, app: &mut SetDestoApp, column: FobImportSortColumn) {
+    let arrow = if app.fob_import_sort_column == column {
+        if app.fob_import_sort_ascending {
+            "⬆"
+        } else {
+            "⬇"
+        }
+    } else {
+        "↕"
+    };
+    let label = format!("{} {arrow}", column.label());
+    if ui
+        .add(egui::Button::new(label).wrap_mode(egui::TextWrapMode::Extend))
+        .clicked()
+    {
+        app.toggle_fob_import_sort(column);
+    }
+}
+
+fn single_line_label(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) {
+    ui.add(egui::Label::new(text).extend());
 }

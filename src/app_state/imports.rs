@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use tracing::{info, warn};
@@ -7,7 +8,7 @@ use crate::fobscout;
 use crate::sde::{MAX_OPTIMIZED_ROUTE_STOPS, RouteDestination};
 
 use super::SetDestoApp;
-use super::models::{FobImportSystem, WaypointSendRequest};
+use super::models::{FobImportSortColumn, FobImportSystem, WaypointSendRequest};
 
 impl SetDestoApp {
     pub fn open_fob_import(&mut self) {
@@ -42,12 +43,9 @@ impl SetDestoApp {
                     None if graph.is_some() => (
                         None,
                         None,
-                        Some(format!(
-                            "{} was not found in the SDE route graph",
-                            row.system
-                        )),
+                        Some(format!("{} was not found in the route map", row.system)),
                     ),
-                    None => (None, None, Some("SDE route graph is not ready".to_string())),
+                    None => (None, None, Some("Route map is still loading".to_string())),
                 };
                 let valid = resolved_system_id.is_some() && error.is_none();
 
@@ -59,7 +57,7 @@ impl SetDestoApp {
                     region: row.region,
                     last_seen_utc: row.last_seen_utc,
                     claimed_by: row.claimed_by,
-                    selected: valid && previous_selected.unwrap_or(true),
+                    selected: valid && previous_selected.unwrap_or(false),
                     error,
                 }
             })
@@ -83,6 +81,31 @@ impl SetDestoApp {
         {
             row.selected = selected;
         }
+    }
+
+    pub fn toggle_fob_import_sort(&mut self, column: FobImportSortColumn) {
+        if self.fob_import_sort_column == column {
+            self.fob_import_sort_ascending = !self.fob_import_sort_ascending;
+        } else {
+            self.fob_import_sort_column = column;
+            self.fob_import_sort_ascending = column.default_ascending();
+        }
+    }
+
+    pub fn sorted_fob_import_rows(&self) -> Vec<FobImportSystem> {
+        let mut rows = self.fob_import_rows.clone();
+        let column = self.fob_import_sort_column;
+        let ascending = self.fob_import_sort_ascending;
+        rows.sort_by(|left, right| {
+            let ordering = compare_fob_import_rows(left, right, column);
+            if ascending {
+                ordering
+            } else {
+                ordering.reverse()
+            }
+            .then_with(|| left.import_index.cmp(&right.import_index))
+        });
+        rows
     }
 
     pub fn valid_fob_import_count(&self) -> usize {
@@ -116,7 +139,7 @@ impl SetDestoApp {
         }
 
         let Some(graph) = self.sde_route_graph.clone() else {
-            self.status_message = "SDE route graph is not ready".to_string();
+            self.status_message = "Route map is still loading".to_string();
             return;
         };
 
@@ -199,4 +222,35 @@ impl SetDestoApp {
             })
             .collect()
     }
+}
+
+impl FobImportSortColumn {
+    fn default_ascending(self) -> bool {
+        match self {
+            Self::Use => false,
+            Self::System | Self::Region | Self::ClaimedBy => true,
+            Self::LastSeenUtc => false,
+        }
+    }
+}
+
+fn compare_fob_import_rows(
+    left: &FobImportSystem,
+    right: &FobImportSystem,
+    column: FobImportSortColumn,
+) -> Ordering {
+    match column {
+        FobImportSortColumn::Use => left
+            .selected
+            .cmp(&right.selected)
+            .then_with(|| left.valid().cmp(&right.valid())),
+        FobImportSortColumn::System => compare_text(left.display_system(), right.display_system()),
+        FobImportSortColumn::Region => compare_text(&left.region, &right.region),
+        FobImportSortColumn::LastSeenUtc => compare_text(&left.last_seen_utc, &right.last_seen_utc),
+        FobImportSortColumn::ClaimedBy => compare_text(&left.claimed_by, &right.claimed_by),
+    }
+}
+
+fn compare_text(left: &str, right: &str) -> Ordering {
+    left.to_ascii_lowercase().cmp(&right.to_ascii_lowercase())
 }

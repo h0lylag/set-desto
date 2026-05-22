@@ -264,13 +264,13 @@ pub fn start_cache_refresh(cached_build_number: Option<u64>) -> Receiver<SdeCach
             Ok(Some(graph)) => SdeCacheEvent::Ready {
                 graph,
                 refreshed: true,
-                message: "SDE route cache refreshed".to_string(),
+                message: "updated".to_string(),
             },
             Ok(None) => match load_cached_graph() {
                 Ok(graph) => SdeCacheEvent::Ready {
                     graph,
                     refreshed: false,
-                    message: "SDE route cache is current".to_string(),
+                    message: "current".to_string(),
                 },
                 Err(err) => SdeCacheEvent::Failed {
                     error: err.to_string(),
@@ -291,7 +291,7 @@ fn refresh_route_cache(
     cached_build_number: Option<u64>,
     sender: &mpsc::Sender<SdeCacheEvent>,
 ) -> Result<Option<Arc<RouteGraph>>> {
-    send_status(sender, "Checking SDE route metadata...");
+    send_status(sender, "checking for updates");
     let metadata = fetch_sde_metadata()?;
     debug!(
         build_number = metadata.build_number,
@@ -313,14 +313,14 @@ fn refresh_route_cache(
     let zip_path = cache_directory.join(SDE_ZIP_FILE);
 
     remove_file_if_exists(&zip_path)?;
-    send_status(sender, "Downloading SDE route graph...");
+    send_status(sender, "downloading route map");
     download_sde_zip(&zip_path)?;
-    send_status(sender, "Extracting SDE route tables...");
+    send_status(sender, "extracting route data");
     extract_needed_jsonl_files(&zip_path, &cache_directory)?;
     remove_file_if_exists(&zip_path)?;
-    send_status(sender, "Parsing SDE route graph...");
+    send_status(sender, "building route map");
     let cache = parse_sde_cache_files(&cache_directory, metadata)?;
-    send_status(sender, "Saving SDE route graph...");
+    send_status(sender, "saving route map");
     save_route_cache(&cache)?;
     save_sde_metadata(&cache)?;
     cleanup_stale_sde_artifacts(&cache_directory)?;

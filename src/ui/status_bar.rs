@@ -4,14 +4,6 @@ use crate::app_state::SetDestoApp;
 
 pub fn render(ctx: &egui::Context, app: &mut SetDestoApp) {
     egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(&app.status_message);
-
-            if app.can_retry_failed_waypoints() && ui.button("Retry Failed").clicked() {
-                app.retry_failed_waypoints();
-            }
-        });
-
         if let Some(summary) = app.waypoint_batch_summary()
             && summary.in_progress
         {
@@ -23,12 +15,19 @@ pub fn render(ctx: &egui::Context, app: &mut SetDestoApp) {
             );
         }
 
-        ui.separator();
         ui.horizontal(|ui| {
-            if app.sde_cache_in_progress() {
-                ui.add(egui::Spinner::new().size(14.0));
+            ui.add(egui::Label::new(&app.status_message).truncate());
+
+            if app.can_retry_failed_waypoints() && ui.button("Retry Failed").clicked() {
+                app.retry_failed_waypoints();
             }
-            ui.label(format!("SDE: {}", app.sde_cache_status));
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add(egui::Label::new(format!("Route map: {}", app.sde_cache_status)).truncate());
+                if app.sde_cache_in_progress() {
+                    ui.add(egui::Spinner::new().size(14.0));
+                }
+            });
         });
     });
 }
