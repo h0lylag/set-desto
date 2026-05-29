@@ -22,7 +22,7 @@ pkgs.rustPlatform.buildRustPackage rec {
   pname = manifest.name;
   version = manifest.version;
 
-  cargoLock.lockFile = ./Cargo.lock;
+  cargoHash = "sha256-JCoUVOoWYETosVL95IcNGK5H2IHmRr+zE39qZA5AFKE=";
 
   src = pkgs.lib.cleanSource ./.;
 
